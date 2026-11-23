@@ -10,8 +10,7 @@ const KONT_REIHE = ["Europa", "Asien", "Nordamerika", "Südamerika", "Afrika", "
 const regionDE = new Intl.DisplayNames(["de"], { type: "region" });
 const flagge = (c) => String.fromCodePoint(...[...c].map((x) => 0x1f1a5 + x.charCodeAt(0)));
 
-let laenderDaten = [], welt = null, landInfo = {}, segment = "besucht", weltLayer = null, overlay = null;
-const weltMap = L.map("weltkarte", { zoomControl: false, attributionControl: false, worldCopyJump: true, minZoom: 1, maxBounds: [[-75, -400], [85, 400]] }).setView([30, 10], 1);
+let laenderDaten = [], welt = null, landInfo = {}, segment = "besucht", overlay = null;
 
 // Land-Name (aus Orten, deutsch) → ISO2
 function isoVonName(n) {
@@ -34,54 +33,67 @@ function statusMap() {
 }
 const warDort = (s) => s === "besucht" || s === "gelebt";
 
-// Kopfzeile auf der Karte (ersetzt die Version aus app.js)
+// Kopf auf der Karte: Zähler für den gewählten Reiter (Bereist / Gelebt / Wunsch)
+const imSegment = (st) => (segment === "besucht" ? warDort(st) : st === segment);
 function zeichneLaender() {
   if (!welt) return;
   const m = statusMap();
-  const war = Object.keys(m).filter((c) => warDort(m[c]));
-  const n = war.filter((c) => UN_SET.has(c)).length, extra = war.length - n;
-  const wunsch = Object.keys(m).filter((c) => m[c] === "wunsch" && UN_SET.has(c)).length;
+  const codes = Object.keys(m).filter((c) => imSegment(m[c]));
+  const n = codes.filter((c) => UN_SET.has(c)).length, extra = codes.length - n;
   const pz = Math.floor((n / UN.length) * 100);
-  $("#laender").innerHTML = `<div class="zahlen"><span class="gross">${n}</span><span>von ${UN.length} Ländern bereist</span><span class="prozent">${pz} %</span></div>
-    <div class="balken"><i style="width:${Math.max(1, (n / UN.length) * 100)}%"></i></div>
-    <small>Noch ${UN.length - n} Länder offen${wunsch ? ` · ${wunsch} auf der Wunschliste` : ""}${extra ? ` · +${extra} weitere Gebiete` : ""}</small>`;
-  $("#laender").onclick = () => wechsle("laender");
-  zeichneWelt(m); zeichneUebersicht(m); zeichneOverlay(m);
+  const label = segment === "wunsch" ? "Ländern auf der Wunschliste" : segment === "gelebt" ? "Ländern gelebt" : "Ländern bereist";
+  $("#laender").innerHTML = `<div class="zahlen"><span class="gross">${n}</span><span>von ${UN.length} ${label}</span><span class="prozent">${pz} %</span></div>
+    <div class="balken"><i style="width:${Math.max(1, (n / UN.length) * 100)}%;background:${LFARBE[segment]}"></i></div>
+    <small>${segment === "wunsch" ? "" : `Noch ${UN.length - n} Länder offen`}${extra ? ` · +${extra} weitere Gebiete` : ""}</small>`;
+  $("#laender").onclick = laenderMenue;
+  zeichneOverlay(m);
 }
-
-function stil(m) {
-  return (f) => { const s = m[f.properties.iso];
-    return { weight: 0.6, color: "#ffffff", fillOpacity: 1, fillColor: s ? LFARBE[s] : "#d6dbd7" }; };
-}
-function zeichneWelt(m) {
-  if (weltLayer) weltLayer.remove();
-  weltLayer = L.geoJSON(welt, { style: stil(m), onEachFeature: (f, l) => l.on("click", () => landSheet(f.properties.iso)) }).addTo(weltMap);
-}
-// Auf der Hauptkarte: bereiste Länder leicht eingefärbt
+// Länder auf der Hauptkarte bunt: Farbe je Status, antippen = Land-Details
 function zeichneOverlay(m) {
   if (overlay) overlay.remove();
-  overlay = L.geoJSON({ type: "FeatureCollection", features: welt.features.filter((f) => warDort(m[f.properties.iso])) },
-    { interactive: false, style: { weight: 1, color: "#f59e0b", opacity: 0.6, fillColor: "#f59e0b", fillOpacity: 0.12 } }).addTo(map);
+  overlay = L.geoJSON({ type: "FeatureCollection", features: welt.features.filter((f) => m[f.properties.iso]) }, {
+    style: (f) => { const st = m[f.properties.iso], an = imSegment(st);
+      return { weight: an ? 1.2 : 0.6, color: LFARBE[st], opacity: an ? 0.9 : 0.3, fillColor: LFARBE[st], fillOpacity: an ? 0.38 : 0.08 }; },
+    onEachFeature: (f, l) => l.on("click", (e) => { if (map.getZoom() < 7) { L.DomEvent.stop(e); landSheet(f.properties.iso); } }),
+  }).addTo(map);
   overlay.bringToBack();
 }
-
-function zeichneUebersicht(m) {
-  const codes = Object.keys(m).filter((c) => (segment === "besucht" ? warDort(m[c]) : m[c] === segment));
-  const n = codes.filter((c) => UN_SET.has(c)).length, pz = Math.floor((n / UN.length) * 100);
-  const label = segment === "wunsch" ? "Ländern auf der Wunschliste" : segment === "gelebt" ? "Ländern gelebt" : "Ländern bereist";
-  $("#gesamt").innerHTML = `<div class="zahlen"><span class="gross">${n}</span><span>von ${UN.length} ${label}</span><span class="prozent">${pz} %</span></div>
-    <div class="balken"><i style="width:${Math.max(1, (n / UN.length) * 100)}%;background:${LFARBE[segment]}"></i></div>
-    <small>${segment === "wunsch" ? "" : `Noch ${UN.length - n} Länder offen`}${codes.length > n ? ` · +${codes.length - n} weitere Gebiete` : ""}</small>`;
+// Titelbild eines Landes: erstes Webseiten-Foto eines Orts dort
+function landBild(c) {
+  const o = orte.find((x) => isoVonName(x.land) === c && x.webFotos?.length);
+  return o ? `<img src="${o.webFotos[0]}-klein.webp" loading="lazy" alt="">` : `<span class="leer flagge-gross">${flagge(c)}</span>`;
+}
+const landName = (c) => regionDE.of(c) || landInfo[c]?.de || c;
+function zoomeLand(c) {
+  const f = welt.features.find((x) => x.properties.iso === c);
+  landFilter = c; schliesseSheet(); zeichneKarte();
+  $("#b-laenderwahl").textContent = `${flagge(c)} ${landName(c)} ▾`;
+  if (!f) return;
+  // Bei Ländern mit Überseegebieten auf den größten Teil zoomen
+  let g = f.geometry;
+  if (g.type === "MultiPolygon") { const flaeche = (p) => { const b = L.polygon(p).getBounds(); return (b.getNorth() - b.getSouth()) * (b.getEast() - b.getWest()); };
+    const groesste = g.coordinates.map((p) => p.map((r) => r.map(([x, y]) => [y, x]))).sort((a, b) => flaeche(b) - flaeche(a))[0];
+    map.fitBounds(L.polygon(groesste).getBounds(), { padding: [20, 20], maxZoom: 9 }); }
+  else map.fitBounds(L.geoJSON(f).getBounds(), { padding: [20, 20], maxZoom: 9 });
+}
+function alleLaender() {
+  landFilter = ""; schliesseSheet(); zeichneKarte(); $("#b-laenderwahl").textContent = "🌍 Alle Länder ▾"; map.setView([35, 10], 2);
+}
+// Aufklapp-Menü: alle Länder des Reiters mit Bild, gruppiert nach Kontinent
+function laenderMenue() {
+  const m = statusMap();
+  const codes = Object.keys(m).filter((c) => imSegment(m[c]));
   const gruppen = {};
   for (const c of codes) { const k = landInfo[c]?.k || "Sonstige"; (gruppen[k] ||= []).push(c); }
-  const name = (c) => regionDE.of(c) || landInfo[c]?.de || c;
-  $("#laender-liste").innerHTML = Object.keys(gruppen).sort((a, b) => KONT_REIHE.indexOf(a) - KONT_REIHE.indexOf(b)).map((k) =>
-    `<h3>${k} (${gruppen[k].length})</h3>` + gruppen[k].sort((a, b) => name(a).localeCompare(name(b), "de")).map((c) => {
-      const orteHier = orte.filter((o) => isoVonName(o.land) === c).length;
-      return `<div class="item" onclick="landSheet('${c}')"><span class="flagge">${flagge(c)}</span><div><b>${esc(name(c))}</b>
-        <small>${orteHier ? `${orteHier} Orte` : ""}</small></div>${UN_SET.has(c) ? `<span class="un">UN</span>` : ""}</div>`;
-    }).join("")).join("") || `<p class="hint">Noch keine Länder. Tippe auf ein Land in der Karte oder auf „+ Land“.</p>`;
+  oeffneSheet(`<div class="sheet-head"><h2>${LNAME[segment]} (${codes.length})</h2><button class="x" onclick="schliesseSheet()">✕</button></div>
+    <div class="row"><button onclick="alleLaender()">🌍 Ganze Welt</button><button onclick="landSuche()">+ Land</button></div>` +
+    Object.keys(gruppen).sort((a, b) => KONT_REIHE.indexOf(a) - KONT_REIHE.indexOf(b)).map((k) => `<h3>${k} (${gruppen[k].length})</h3><div class="landgitter">` +
+      gruppen[k].sort((a, b) => landName(a).localeCompare(landName(b), "de")).map((c) => {
+        const n = orte.filter((o) => isoVonName(o.land) === c).length;
+        return `<button class="landkachel" onclick="zoomeLand('${c}')">${landBild(c)}<span><b>${flagge(c)} ${esc(landName(c))}</b><small>${n ? `${n} Orte` : UN_SET.has(c) ? "UN" : "Gebiet"}</small></span></button>`;
+      }).join("") + "</div>").join("") || `<p class="hint">Noch keine Länder in „${LNAME[segment]}“.</p>`);
 }
+$("#b-laenderwahl").onclick = laenderMenue;
 
 async function setzeLand(c, status) {
   await DB.put("laender", { code: c, status }); laenderDaten = await DB.all("laender");
@@ -93,22 +105,20 @@ function landSheet(c) {
   oeffneSheet(`<div class="sheet-head"><h2>${flagge(c)} ${esc(regionDE.of(c) || c)}</h2><button class="x" onclick="schliesseSheet()">✕</button></div>
     <p class="meta">${esc(landInfo[c]?.k || "")}${UN_SET.has(c) ? " · UN-Mitglied" : " · zählt nicht zu den 195"}${s ? ` · aktuell: ${LNAME[s]}` : ""}</p>
     <div class="row">${["besucht", "gelebt", "wunsch"].map((x) => `<button onclick="setzeLand('${c}','${x}')" style="${s === x ? `background:${LFARBE[x]};color:#111;border:0` : ""}">${LNAME[x]}</button>`).join("")}</div>
-    ${s ? `<button onclick="setzeLand('${c}','keins')">Entfernen</button>` : ""}
+    <div class="row"><button onclick="zoomeLand('${c}')">🗺️ Auf Karte zeigen</button>${s ? `<button onclick="setzeLand('${c}','keins')">Entfernen</button>` : ""}</div>
     ${orteHier.length ? `<h3>Orte (${orteHier.length})</h3>` + orteHier.map((o) => `<div class="item" onclick="zeigeOrt('${o.id}')"><span class="dot" style="background:${FARBE[o.status]}"></span><div><b>${esc(o.name)}</b><small>${esc(o.status)}</small></div></div>`).join("") : ""}`);
 }
-$("#b-land-neu").onclick = () => {
+function landSuche() {
   const alle = Object.keys(landInfo).map((c) => [c, regionDE.of(c) || landInfo[c].de]).sort((a, b) => a[1].localeCompare(b[1], "de"));
   oeffneSheet(`<div class="sheet-head"><h2>Land hinzufügen</h2><button class="x" onclick="schliesseSheet()">✕</button></div>
     <input id="land-such" placeholder="Land suchen…" autocomplete="off"><div id="land-treffer"></div>`);
   const zeig = (q) => { $("#land-treffer").innerHTML = alle.filter(([, n]) => n.toLowerCase().includes(q.toLowerCase())).slice(0, 30)
     .map(([c, n]) => `<button class="treffer" onclick="landSheet('${c}')">${flagge(c)} ${esc(n)}</button>`).join(""); };
   $("#land-such").oninput = (e) => zeig(e.target.value); zeig(""); $("#land-such").focus();
-};
+}
 document.querySelectorAll("#seg button").forEach((b) => (b.onclick = () => {
-  segment = b.dataset.s; document.querySelectorAll("#seg button").forEach((x) => x.classList.toggle("on", x === b)); zeichneUebersicht(statusMap());
+  segment = b.dataset.s; document.querySelectorAll("#seg button").forEach((x) => x.classList.toggle("on", x === b)); zeichneLaender();
 }));
-// Karte neu einpassen, wenn der Tab sichtbar wird
-new ResizeObserver(() => weltMap.invalidateSize()).observe($("#weltkarte"));
 
 (async () => {
   welt = await fetch("welt.geojson").then((r) => r.json());

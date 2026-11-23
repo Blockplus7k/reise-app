@@ -9,7 +9,8 @@ let orte = [], reisen = [], aktiveReise = null;
 const urls = []; // ObjectURLs für Fotos, beim Schließen freigeben
 
 // ---------- Karte ----------
-const map = L.map("map", { zoomControl: false, worldCopyJump: true, minZoom: 2 }).setView([40, 10], 3);
+let landFilter = ""; // ISO2 des gewählten Landes ("" = alle)
+const map = L.map("map", { zoomControl: false, worldCopyJump: true, minZoom: 2 }).setView([35, 10], 2);
 // Wie auf der Webseite: OpenStreetMap Deutschland – deutsche Länder- und Ortsnamen schon weit herausgezoomt
 L.tileLayer("https://tile.openstreetmap.de/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap-Mitwirkende" }).addTo(map);
 const cluster = L.markerClusterGroup({ maxClusterRadius: 45, disableClusteringAtZoom: 9, showCoverageOnHover: false }).addTo(map);
@@ -57,8 +58,8 @@ function waehle(id) {
 
 function zeichneKarte() {
   cluster.clearLayers();
-  const fs = $("#f-status").value, fl = $("#f-land").value;
-  const sicht = orte.filter((o) => (!fs || o.status === fs) && (!fl || o.land === fl))
+  const fs = $("#f-status").value, fl = landFilter;
+  const sicht = orte.filter((o) => (!fs || o.status === fs) && (!fl || isoVonName(o.land) === fl))
     .sort((a, b) => (a.status === "besucht" ? 0 : 1) - (b.status === "besucht" ? 0 : 1) || a.land.localeCompare(b.land) || a.name.localeCompare(b.name));
   for (const k in markerVon) delete markerVon[k];
   for (const o of sicht) {
@@ -66,15 +67,8 @@ function zeichneKarte() {
       .on("click", () => { markiere(o.id); zeigeOrt(o.id); }).addTo(cluster);
   }
   zeichneLeiste(sicht);
-  const laender = [...new Set(orte.map((o) => o.land).filter(Boolean))].sort();
-  $("#f-land").innerHTML = `<option value="">Alle Länder</option>` + laender.map((l) => `<option ${l === fl ? "selected" : ""}>${esc(l)}</option>`).join("");
 }
 $("#f-status").onchange = zeichneKarte;
-$("#f-land").onchange = () => {
-  zeichneKarte();
-  const pts = orte.filter((o) => o.land === $("#f-land").value).map((o) => [o.lat, o.lon]);
-  if (pts.length) map.fitBounds(pts, { padding: [40, 40] });
-};
 
 // Langes Drücken / Rechtsklick = neuer Ort
 map.on("contextmenu", (e) => bearbeiteOrt({ lat: e.latlng.lat, lon: e.latlng.lng }));
@@ -135,7 +129,7 @@ async function zeigeOrt(id) {
 
 function bearbeiteOrt(o) {
   const neu = !o.id;
-  o = { status: "idee", prio: 2, typ: "", land: $("#f-land").value || "", region: "", notiz: "", link: "", name: "", ...o };
+  o = { status: "idee", prio: 2, typ: "", land: landFilter ? regionDE.of(landFilter) : "", region: "", notiz: "", link: "", name: "", ...o };
   oeffneSheet(`
     <div class="sheet-head"><h2>${neu ? "Neuer Ort" : "Ort bearbeiten"}</h2><button class="x" onclick="schliesseSheet()">✕</button></div>
     <form id="f-ort">
@@ -207,26 +201,34 @@ function distKm(a, b, c, d) {
 }
 // Globaler Import: Foto per GPS dem nächsten Ort (≤ 1 km) zuordnen, sonst neuen besuchten Ort anlegen
 $("#b-fotoimport").onclick = () => $("#in-fotos").click();
-$("#in-fotos").onchange = async (e) => {
-  const files = [...e.target.files]; e.target.value = "";
+// Fotos importieren: per GPS dem nächsten Ort (≤ 1 km) zuordnen, sonst neuen besuchten Ort anlegen.
+// Mit reiseId werden die Fotos zusätzlich der Reise zugeordnet (auch ohne GPS).
+async function importiereFotos(files, reiseId) {
   let zu = 0, neu = 0, ohne = 0;
   for (const file of files) {
     const f = await leseFoto(file);
-    if (!f.gps) { ohne++; continue; }
-    const { latitude: la, longitude: lo } = f.gps;
-    let best = null, bd = 1;
-    for (const o of orte) { const d = distKm(la, lo, o.lat, o.lon); if (d < bd) { bd = d; best = o; } }
-    if (!best) {
-      best = { id: uid(), name: `Foto-Ort ${f.datum || ""}`.trim(), lat: la, lon: lo, status: "besucht", prio: 2, typ: "", land: "", region: "", notiz: "", link: "", besuchtAm: f.datum || "" };
-      orte.push(best); neu++;
-    } else zu++;
-    if (best.status !== "besucht") { best.status = "besucht"; best.besuchtAm = best.besuchtAm || f.datum || ""; }
-    await DB.put("orte", best);
-    await DB.put("fotos", { id: uid(), ortId: best.id, datum: f.datum, bild: f.bild, thumb: f.thumb });
+    let best = null;
+    if (f.gps) {
+      const { latitude: la, longitude: lo } = f.gps; let bd = 1;
+      for (const o of orte) { const d = distKm(la, lo, o.lat, o.lon); if (d < bd) { bd = d; best = o; } }
+      if (!best) {
+        best = { id: uid(), name: `Foto-Ort ${f.datum || ""}`.trim(), lat: la, lon: lo, status: "besucht", prio: 2, typ: "", land: "", region: "", notiz: "", link: "", besuchtAm: f.datum || "" };
+        orte.push(best); neu++;
+      } else zu++;
+      if (best.status !== "besucht") { best.status = "besucht"; best.besuchtAm = best.besuchtAm || f.datum || ""; }
+      await DB.put("orte", best);
+    } else ohne++;
+    if (best || reiseId) await DB.put("fotos", { id: uid(), ortId: best?.id || null, reiseId: reiseId || null, datum: f.datum, bild: f.bild, thumb: f.thumb });
   }
   await lade();
+  return { zu, neu, ohne };
+}
+$("#in-fotos").onchange = async (e) => {
+  const files = [...e.target.files]; e.target.value = "";
+  const { zu, neu, ohne } = await importiereFotos(files);
   alert(`${zu} Fotos bestehenden Orten zugeordnet, ${neu} neue Orte angelegt` + (ohne ? `, ${ohne} ohne GPS übersprungen (im Ort über „+ Fotos“ hinzufügen)` : ""));
 };
+
 
 // ---------- Wunschliste ----------
 function zeichneWunsch() {
@@ -253,37 +255,86 @@ function zeichneReisen() {
   }).join("") || "<p class='hint'>Noch keine Reise. Lege eine an und füge Wunschorte zu den Tagen hinzu.</p>";
 }
 $("#b-neue-reise").onclick = () => bearbeiteReise({});
+const FRAGEN = [
+  ["highlight", "Was war dein Highlight?", "Der eine Moment, an den du zuerst denkst"],
+  ["begegnung", "Beste Begegnung?", "Ein Mensch, ein Gespräch, ein Tier …"],
+  ["essen", "Bestes Essen oder Getränk?", ""],
+  ["ueberraschung", "Was hat dich überrascht?", ""],
+  ["ort", "Lieblingsort der Reise?", ""],
+  ["anders", "Was würdest du nächstes Mal anders machen?", ""],
+  ["satz", "Die Reise in einem Satz", ""],
+];
 function bearbeiteReise(r) {
+  const heute = new Date().toISOString().slice(0, 10);
+  const laenderListe = Object.keys(landInfo).map((c) => [c, landName(c)]).sort((a, b) => a[1].localeCompare(b[1], "de"));
+  const fr = r.fragen || {};
   oeffneSheet(`
     <div class="sheet-head"><h2>${r.id ? "Reise bearbeiten" : "Neue Reise"}</h2><button class="x" onclick="schliesseSheet()">✕</button></div>
     <form id="f-reise">
-      <label>Titel<input name="titel" required value="${esc(r.titel || "")}" placeholder="Georgien 2027"></label>
+      <label>Wohin?<select name="land"><option value="">– Land wählen –</option>${laenderListe.map(([c, n]) => `<option value="${c}" ${c === r.land ? "selected" : ""}>${flagge(c)} ${esc(n)}</option>`).join("")}</select></label>
+      <label>Titel<input name="titel" value="${esc(r.titel || "")}" placeholder="z. B. Island Roadtrip"></label>
+      <p class="frage">Wann war die Reise?</p>
       <div class="row"><label>Von<input type="date" name="von" required value="${esc(r.von || "")}"></label><label>Bis<input type="date" name="bis" required value="${esc(r.bis || "")}"></label></div>
-      <label>Notiz<textarea name="notiz" rows="3">${esc(r.notiz || "")}</textarea></label>
+      <div id="erinnerung">
+        <p class="frage">Erzähl mal 🙂</p>
+        ${FRAGEN.map(([k, t, h]) => `<label>${t}<textarea name="f_${k}" rows="2" placeholder="${esc(h)}">${esc(fr[k] || "")}</textarea></label>`).join("")}
+        <label>Wie war die Reise insgesamt?<div class="sterne" id="sterne">${[1, 2, 3, 4, 5].map((n) => `<button type="button" data-n="${n}" class="${n <= (r.sterne || 0) ? "an" : ""}">★</button>`).join("")}</div></label>
+      </div>
+      <label>Notiz<textarea name="notiz" rows="2">${esc(r.notiz || "")}</textarea></label>
+      <label class="btn fotoknopf">📷 Fotos hinzufügen<input type="file" name="fotos" accept="image/*" multiple hidden></label>
+      <p class="hint" id="foto-info">Fotos mit GPS landen automatisch beim passenden Ort auf der Karte.</p>
       <div class="row"><button type="submit">Speichern</button>${r.id ? `<button type="button" class="danger" id="b-rdel">Löschen</button>` : ""}</div>
     </form>`);
-  $("#f-reise").onsubmit = async (e) => {
+  const f = $("#f-reise");
+  let sterne = r.sterne || 0;
+  $("#sterne").onclick = (e) => { const n = +e.target.dataset.n; if (!n) return; sterne = n;
+    $("#sterne").querySelectorAll("button").forEach((b) => b.classList.toggle("an", +b.dataset.n <= n)); };
+  // Fragen nur bei Reisen, die schon begonnen haben
+  const pruefe = () => { $("#erinnerung").hidden = !!f.von.value && f.von.value > heute; };
+  f.von.onchange = () => { if (!f.bis.value || f.bis.value < f.von.value) f.bis.value = f.von.value; pruefe(); };
+  pruefe();
+  f.fotos.onchange = () => { $("#foto-info").textContent = `${f.fotos.files.length} Fotos ausgewählt – werden beim Speichern hinzugefügt.`; };
+  f.onsubmit = async (e) => {
     e.preventDefault();
-    const d = Object.fromEntries(new FormData(e.target));
+    const d = Object.fromEntries(new FormData(f)); const files = [...f.fotos.files];
     if (d.bis < d.von) return alert("Ende liegt vor Anfang");
+    const fragen = {}; for (const [k] of FRAGEN) { if (d["f_" + k]?.trim()) fragen[k] = d["f_" + k].trim(); }
+    const titel = d.titel.trim() || `${d.land ? landName(d.land) : "Reise"} ${d.von.slice(0, 4)}`;
     const alt = Object.fromEntries((r.tage || []).map((t) => [t.datum, t.orte]));
-    const rec = { ...r, ...d, id: r.id || uid(), tage: tageZwischen(d.von, d.bis).map((t) => ({ datum: t, orte: alt[t] || [] })) };
-    await DB.put("reisen", rec); await lade(); zeigeReise(rec.id);
+    const rec = { ...r, titel, land: d.land, von: d.von, bis: d.bis, notiz: d.notiz, fragen, sterne, id: r.id || uid(),
+      tage: tageZwischen(d.von, d.bis).map((t) => ({ datum: t, orte: alt[t] || [] })) };
+    await DB.put("reisen", rec);
+    // Vergangene Reise → Land als bereist markieren, künftige → Wunsch
+    if (d.land) { const st = statusMap()[d.land];
+      if (d.von <= heute && !warDort(st)) await DB.put("laender", { code: d.land, status: "besucht" });
+      else if (d.von > heute && !st) await DB.put("laender", { code: d.land, status: "wunsch" });
+      laenderDaten = await DB.all("laender"); }
+    if (files.length) { $("#foto-info").textContent = `Lade ${files.length} Fotos …`; await importiereFotos(files, rec.id); }
+    await lade(); zeigeReise(rec.id);
   };
-  if (r.id) $("#b-rdel").onclick = async () => { if (confirm("Reise löschen? Orte bleiben erhalten.")) { await DB.del("reisen", r.id); schliesseSheet(); lade(); } };
+  if (r.id) $("#b-rdel").onclick = async () => { if (confirm("Reise löschen? Orte und Fotos bleiben erhalten.")) { await DB.del("reisen", r.id); schliesseSheet(); lade(); } };
 }
-function zeigeReise(id) {
+async function zeigeReise(id) {
   const r = reisen.find((x) => x.id === id); if (!r) return;
+  const rf = (await DB.all("fotos")).filter((f) => f.reiseId === id);
+  const fotoHtml = rf.map((f) => { const u = URL.createObjectURL(f.thumb); urls.push(u); return `<img src="${u}" data-f="${f.id}" alt="">`; }).join("");
+  const antworten = FRAGEN.filter(([k]) => r.fragen?.[k]).map(([k, t]) => `<div class="antwort"><small>${t}</small><p>${esc(r.fragen[k])}</p></div>`).join("");
   const name = (oid) => orte.find((o) => o.id === oid)?.name || "?";
   const wunsch = orte.filter((o) => o.status !== "verworfen").sort((a, b) => a.name.localeCompare(b.name));
   oeffneSheet(`
     <div class="sheet-head"><h2>${esc(r.titel)}</h2><button class="x" onclick="schliesseSheet()">✕</button></div>
-    <p class="meta">${esc(r.von)} – ${esc(r.bis)}</p>${r.notiz ? `<p>${esc(r.notiz)}</p>` : ""}
+    <p class="meta">${r.land ? flagge(r.land) + " " + esc(landName(r.land)) + " · " : ""}${esc(r.von)} – ${esc(r.bis)}${r.sterne ? " · " + "★".repeat(r.sterne) : ""}</p>${r.notiz ? `<p>${esc(r.notiz)}</p>` : ""}
+    ${antworten}
+    <h3>Fotos (${rf.length})</h3><div class="galerie" id="r-galerie">${fotoHtml}</div>
+    <label class="btn">📷 Fotos hinzufügen<input type="file" accept="image/*" multiple hidden id="in-reisefotos"></label>
     <div class="row"><button onclick="reiseAufKarte('${id}')">🗺️ Route auf Karte</button><button onclick="bearbeiteReise(reisen.find(x=>x.id==='${id}'))">Bearbeiten</button></div>
     ${r.tage.map((t, i) => `<div class="tag"><h3>Tag ${i + 1} · ${new Date(t.datum).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "short" })}</h3>
       ${t.orte.map((oid, j) => `<div class="stop"><span onclick="zeigeOrt('${oid}')">${j + 1}. ${esc(name(oid))}</span>
         <span><button class="mini" onclick="verschiebe('${id}',${i},${j},-1)">↑</button><button class="mini" onclick="verschiebe('${id}',${i},${j},1)">↓</button><button class="mini" onclick="entferne('${id}',${i},${j})">✕</button></span></div>`).join("")}
       <select onchange="fuegeHinzu('${id}',${i},this.value)"><option value="">+ Ort hinzufügen…</option>${wunsch.map((o) => `<option value="${o.id}">${esc(o.name)}${o.land ? " (" + esc(o.land) + ")" : ""}</option>`).join("")}</select></div>`).join("")}`);
+  $("#in-reisefotos").onchange = async (e) => { const files = [...e.target.files]; e.target.value = ""; await importiereFotos(files, id); zeigeReise(id); };
+  $("#r-galerie").onclick = (e) => { const f = rf.find((x) => x.id === e.target.dataset.f); if (!f) return;
+    const u = URL.createObjectURL(f.bild); urls.push(u); $("#viewer-img").src = u; $("#viewer").hidden = false; };
 }
 async function speichereReise(r) { await DB.put("reisen", r); await lade(); zeigeReise(r.id); if (aktiveReise === r.id) reiseAufKarte(r.id, true); }
 async function fuegeHinzu(rid, i, oid) {
@@ -369,9 +420,6 @@ async function lade() {
   }
   await lade();
   map.invalidateSize();
-  const vb = orte.filter((o) => o.status === "besucht");
-  if (vb.length) map.fitBounds(vb.map((o) => [o.lat, o.lon]), { padding: [30, 30], maxZoom: 5 });
-  if (map.getZoom() < 3) map.setZoom(3);
   new ResizeObserver(() => map.invalidateSize()).observe($("#map"));
   if (navigator.storage?.persist) navigator.storage.persist();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");

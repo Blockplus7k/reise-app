@@ -18,12 +18,15 @@
 <body>
 <main>
   <section id="v-karte" class="view active">
-    <div class="laender" id="laender"></div>
+    <div class="laender">
+      <div class="seg" id="seg"><button data-s="besucht" class="on">Bereist</button><button data-s="gelebt">Gelebt</button><button data-s="wunsch">Wunsch</button></div>
+      <div id="laender"></div>
+    </div>
     <div class="map-wrap">
     <div id="map"></div>
     <div class="map-top">
-      <select id="f-status"><option value="">Alle</option><option value="besucht">Besucht</option><option value="geplant">Geplant</option><option value="idee">Idee</option></select>
-      <select id="f-land"><option value="">Alle Länder</option></select>
+      <button id="b-laenderwahl" class="wahl">🌍 Alle Länder ▾</button>
+      <select id="f-status"><option value="">Alle Orte</option><option value="besucht">Besucht</option><option value="geplant">Geplant</option><option value="idee">Idee</option></select>
       <button id="b-hier" title="Mein Standort">◎</button>
     </div>
     <div id="trip-banner" hidden></div>
@@ -31,13 +34,6 @@
     <input type="file" id="in-fotos" accept="image/*" multiple hidden>
     </div>
     <ol class="leiste" id="leiste" aria-label="Alle Orte"></ol>
-  </section>
-  <section id="v-laender" class="view">
-    <h1>Meine Länder <button id="b-land-neu" class="small">+ Land</button></h1>
-    <div class="seg" id="seg"><button data-s="besucht" class="on">Bereist</button><button data-s="gelebt">Gelebt</button><button data-s="wunsch">Wunsch</button></div>
-    <div id="weltkarte"></div>
-    <div class="gesamt" id="gesamt"></div>
-    <div id="laender-liste"></div>
   </section>
   <section id="v-wunsch" class="view"><h1>Wunschliste</h1><div id="wunsch-liste"></div></section>
   <section id="v-reisen" class="view"><h1>Reisen <button id="b-neue-reise" class="small">+ Neu</button></h1><div id="reise-liste"></div></section>
@@ -53,7 +49,6 @@
 </main>
 <nav>
   <button data-v="karte" class="on">🗺️<span>Karte</span></button>
-  <button data-v="laender">🌍<span>Länder</span></button>
   <button data-v="wunsch">⭐<span>Wunsch</span></button>
   <button data-v="reisen">🧳<span>Reisen</span></button>
   <button data-v="mehr">⚙️<span>Daten</span></button>
