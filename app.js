@@ -46,11 +46,26 @@ function zeichneLeiste(liste) {
     return `<li data-o="${o.id}"><a href="#" onclick="return waehle('${o.id}')">${bild}<span><strong>${esc(o.name)}</strong>
       <small>${esc(o.land && o.land !== o.name ? o.land : o.typ || "")}${n ? ` · ${n} Fotos` : ""}</small></span></a></li>`;
   }).join("");
-  if (rs.length) fuelleOrdner(rs);
+  fuelleOrdner(rs);
+}
+// Jede Reise als Ordner-Pin auf der Weltkarte: Mitte der Foto-Standorte, sonst Mitte des Landes
+const reiseLayer = L.layerGroup().addTo(map);
+function zeichneReisePins(rs, alle) {
+  reiseLayer.clearLayers();
+  for (const r of rs) {
+    const pts = reiseFotos(r, alle).filter((f) => f.lat != null && f.lon != null).map((f) => [f.lat, f.lon]);
+    for (const oid of r.tage.flatMap((t) => t.orte)) { const o = orte.find((x) => x.id === oid); if (o) pts.push([o.lat, o.lon]); }
+    let pos = pts.length ? [pts.reduce((s, p) => s + p[0], 0) / pts.length, pts.reduce((s, p) => s + p[1], 0) / pts.length] : null;
+    if (!pos && r.land && typeof landInfo !== "undefined" && landInfo[r.land]) pos = [landInfo[r.land].ly, landInfo[r.land].lx];
+    if (!pos) continue;
+    L.marker(pos, { zIndexOffset: 1000, title: r.titel, icon: L.divIcon({ className: "", iconSize: [40, 40], iconAnchor: [20, 20],
+      html: `<div class="reise-pin">📁<span>${esc(r.titel)}</span></div>` }) }).on("click", () => zeigeOrdner(r.id)).addTo(reiseLayer);
+  }
 }
 async function fuelleOrdner(rs) {
   leisteUrls.forEach(URL.revokeObjectURL); leisteUrls = [];
   const alle = await DB.all("fotos");
+  zeichneReisePins(rs, alle);
   for (const r of rs) {
     const fs = reiseFotos(r, alle);
     const anz = document.querySelector(`[data-ranz="${r.id}"]`); if (anz) anz.textContent = `${(r.von || "").slice(0, 4)} · ${fs.length} Fotos`;
@@ -515,3 +530,6 @@ async function lade() {
   if (navigator.storage?.persist) navigator.storage.persist();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 })();
+// Reise-Namen an den Ordner-Pins erst ab Länder-Zoom zeigen (sonst überlappen sie in der Weltansicht)
+const namenZoom = () => $("#map").classList.toggle("pins-klein", map.getZoom() < 5);
+map.on("zoomend", namenZoom); namenZoom();

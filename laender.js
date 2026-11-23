@@ -154,4 +154,5 @@ document.querySelectorAll("#seg button").forEach((b) => (b.onclick = () => {
   laenderDaten = await DB.all("laender");
   if (!laenderDaten.length) { for (const c of START_BEREIST) await DB.putRaw("laender", { code: c, status: "besucht", geaendert: 0 }); laenderDaten = await DB.all("laender"); }
   zeichneLaender();
+  zeichneKarte(); // Reise-Pins brauchen die Landesmitten
 })();
