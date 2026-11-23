@@ -4,7 +4,7 @@
 const SYNC = {
   get repo() { return localStorage.getItem("syncRepo") || "Blockplus7k/reise-daten"; },
   get token() { return localStorage.getItem("syncToken") || ""; },
-  laeuft: false, nochmal: false, timer: null,
+  laeuft: false, nochmal: false, timer: null, start: 0,
 };
 const STORES = ["orte", "reisen", "laender"];
 const keyVon = (s, v) => (s === "laender" ? v.code : v.id);
@@ -14,14 +14,18 @@ function syncStatus(text, fehler) {
   const p = document.querySelector("#sync-punkt"); if (p) p.dataset.s = fehler ? "fehler" : SYNC.laeuft ? "laeuft" : "ok";
 }
 async function gh(pfad, { method = "GET", body, raw } = {}) {
-  const r = await fetch(`https://api.github.com/repos/${SYNC.repo}/contents/${pfad}`, {
+  const r = await mitZeit(fetch(`https://api.github.com/repos/${SYNC.repo}/contents/${pfad}`, {
     method, cache: "no-store",
     headers: { Authorization: `Bearer ${SYNC.token}`, Accept: raw ? "application/vnd.github.raw" : "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
     body: body ? JSON.stringify(body) : undefined,
-  });
+  }), 60000, "Verbindung zu GitHub");
   return r;
 }
-const zuB64 = (blob) => new Promise((res) => { const f = new FileReader(); f.onload = () => res(f.result.split(",")[1]); f.readAsDataURL(blob); });
+const mitZeit = (p, ms, was) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(was + " dauert zu lange")), ms))]);
+const zuB64 = (blob) => mitZeit(new Promise((res, rej) => {
+  if (!blob || !blob.size) return rej(new Error("Foto-Datei leer"));
+  const f = new FileReader(); f.onload = () => res(String(f.result).split(",")[1]); f.onerror = () => rej(f.error || new Error("Foto nicht lesbar")); f.readAsDataURL(blob);
+}), 20000, "Foto lesen");
 const textB64 = (t) => zuB64(new Blob([t]));
 
 async function ladeHoch(pfad, blob, nachricht) {
@@ -39,8 +43,8 @@ window.planeSync = () => {
 async function sync() {
   if (!SYNC.token) return syncStatus("Nicht verbunden");
   if (!navigator.onLine) return syncStatus("Offline – wird gesichert, sobald du online bist");
-  if (SYNC.laeuft) { SYNC.nochmal = true; return; }
-  SYNC.laeuft = true; syncStatus("Sichere …");
+  if (SYNC.laeuft && Date.now() - SYNC.start < 180000) { SYNC.nochmal = true; return syncStatus("Sicherung läuft gerade …"); }
+  SYNC.laeuft = true; SYNC.start = Date.now(); syncStatus("Sichere …");
   try {
     // 1) Stand aus der Cloud holen
     let sha = null, fern = { orte: [], reisen: [], laender: [], fotos: [], geloescht: {} };
@@ -73,7 +77,7 @@ async function sync() {
     // 4) Fotos: fehlende herunterladen, neue hochladen, gelöschte entfernen
     const lokalFotos = Object.fromEntries((await DB.all("fotos")).map((f) => [f.id, f]));
     const fernFotos = Object.fromEntries((fern.fotos || []).map((f) => [f.id, f]));
-    let runter = 0, hoch = 0;
+    let runter = 0, hoch = 0, kaputt = 0;
     for (const id in fernFotos) {
       if (lokalFotos[id] || tomb["fotos:" + id]) continue;
       syncStatus(`Lade Fotos aus der Cloud … ${++runter}`);
@@ -89,9 +93,11 @@ async function sync() {
       if (f.sync && fernFotos[id] && (fernFotos[id].geaendert || 0) >= (f.geaendert || 0)) continue;
       if (!f.sync) {
         syncStatus(`Sichere Fotos … ${++hoch}`);
-        await ladeHoch(`fotos/${id}.jpg`, f.bild, `Foto ${id}`);
-        await ladeHoch(`fotos/${id}-t.jpg`, f.thumb, `Vorschau ${id}`);
-        f.sync = true; await DB.putRaw("fotos", f);
+        try {
+          await ladeHoch(`fotos/${id}.jpg`, f.bild, `Foto ${id}`);
+          await ladeHoch(`fotos/${id}-t.jpg`, f.thumb, `Vorschau ${id}`);
+          f.sync = true; await DB.putRaw("fotos", f);
+        } catch (e) { if (/GitHub|Upload/.test(e.message)) throw e; kaputt++; } // Foto im Speicher defekt → überspringen
       }
     }
     // Dateien gelöschter Fotos im Repo entfernen (nur die, die dort noch gelistet sind)
@@ -114,11 +120,11 @@ async function sync() {
     }
     localStorage.setItem("syncZuletzt", new Date().toISOString());
     SYNC.laeuft = false;
-    syncStatus(`Gesichert · ${new Date().toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })} · ${fotos.length} eigene Fotos in der Cloud`);
+    syncStatus(`Gesichert · ${new Date().toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })} · ${fotos.length} eigene Fotos in der Cloud${kaputt ? ` · ${kaputt} Fotos nicht lesbar (bitte neu hinzufügen)` : ""}`);
     if (geaendert) { laenderDaten = await DB.all("laender"); await lade(); }
   } catch (e) {
     SYNC.laeuft = false;
-    syncStatus("Sicherung fehlgeschlagen: " + e.message, true);
+    syncStatus("Sicherung fehlgeschlagen: " + (e?.message || e), true);
   }
   if (SYNC.nochmal) { SYNC.nochmal = false; setTimeout(sync, 2000); }
 }
