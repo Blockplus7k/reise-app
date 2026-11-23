@@ -32,13 +32,49 @@ function zeichneLaender() {
   $("#laender").onclick = () => alert(`Bereist (${n}):\n${besucht.join(", ")}` + (wunsch.length ? `\n\nWunschliste:\n${wunsch.join(", ")}` : ""));
 }
 const markerVon = {};
+// Leiste unter der Karte: zuerst Reise-Ordner (alle Fotos einer Reise), dann die Orte
+let leisteUrls = [];
+function reiseFotos(r, alle) { return alle.filter((f) => f.reiseId === r.id || (f.ortId && r.tage.some((t) => t.orte.includes(f.ortId)))); }
 function zeichneLeiste(liste) {
-  $("#leiste").innerHTML = liste.map((o) => {
+  const rs = reisen.filter((r) => !landFilter || r.land === landFilter).sort((a, b) => (b.von || "").localeCompare(a.von || ""));
+  $("#leiste").innerHTML = rs.map((r) => `<li data-r="${r.id}" class="ordner"><a href="#" onclick="return zeigeOrdner('${r.id}')">
+      <span class="leer" data-rbild="${r.id}">${r.land ? flagge(r.land) : "🧳"}</span><span><strong>📁 ${esc(r.titel)}</strong>
+      <small data-ranz="${r.id}">${esc((r.von || "").slice(0, 4))} · Reise</small></span></a></li>`).join("") +
+    liste.map((o) => {
     const bild = o.webFotos?.[0] ? `<img src="${o.webFotos[0]}-klein.webp" loading="lazy" alt="">` : `<span class="leer">📍</span>`;
     const n = (o.webFotos || []).length;
     return `<li data-o="${o.id}"><a href="#" onclick="return waehle('${o.id}')">${bild}<span><strong>${esc(o.name)}</strong>
       <small>${esc(o.land && o.land !== o.name ? o.land : o.typ || "")}${n ? ` · ${n} Fotos` : ""}</small></span></a></li>`;
   }).join("");
+  if (rs.length) fuelleOrdner(rs);
+}
+async function fuelleOrdner(rs) {
+  leisteUrls.forEach(URL.revokeObjectURL); leisteUrls = [];
+  const alle = await DB.all("fotos");
+  for (const r of rs) {
+    const fs = reiseFotos(r, alle);
+    const anz = document.querySelector(`[data-ranz="${r.id}"]`); if (anz) anz.textContent = `${(r.von || "").slice(0, 4)} · ${fs.length} Fotos`;
+    const platz = document.querySelector(`[data-rbild="${r.id}"]`);
+    if (platz && fs[0]) { const u = URL.createObjectURL(fs[0].thumb); leisteUrls.push(u); platz.outerHTML = `<img src="${u}" alt="">`; }
+  }
+}
+// Ordner-Ansicht: alle Fotos der Reise (direkt zur Reise hinzugefügt + von Orten der Reise)
+async function zeigeOrdner(id) {
+  const r = reisen.find((x) => x.id === id); if (!r) return false;
+  const fs = reiseFotos(r, await DB.all("fotos")).sort((a, b) => (a.datum || "").localeCompare(b.datum || ""));
+  if (r.land && typeof zeigeLandAufKarte === "function") zeigeLandAufKarte(r.land);
+  document.querySelectorAll(".leiste li.aktiv").forEach((e) => e.classList.remove("aktiv"));
+  document.querySelector(`.leiste li[data-r="${id}"]`)?.classList.add("aktiv");
+  const html = fs.map((f) => { const u = URL.createObjectURL(f.thumb); urls.push(u); return `<img src="${u}" data-f="${f.id}" alt="">`; }).join("");
+  oeffneSheet(`<div class="sheet-head"><h2>📁 ${esc(r.titel)}</h2><button class="x" onclick="schliesseSheet()">✕</button></div>
+    <p class="meta">${r.land ? flagge(r.land) + " " + esc(landName(r.land)) + " · " : ""}${esc(r.von)} – ${esc(r.bis)} · ${fs.length} Fotos</p>
+    <div class="galerie" id="o-galerie">${html || ""}</div>${fs.length ? "" : `<p class="hint">Noch keine Fotos in dieser Reise.</p>`}
+    <label class="btn">📷 Fotos hinzufügen<input type="file" accept="image/*" multiple hidden id="in-ordnerfotos"></label>
+    <div class="row"><button onclick="zeigeReise('${id}')">Reise-Details & Antworten</button></div>`);
+  $("#in-ordnerfotos").onchange = async (e) => { const files = [...e.target.files]; e.target.value = ""; await importiereFotos(files, id); zeigeOrdner(id); };
+  $("#o-galerie").onclick = (e) => { const f = fs.find((x) => x.id === e.target.dataset.f); if (!f) return;
+    const u = URL.createObjectURL(f.bild); urls.push(u); $("#viewer-img").src = u; $("#viewer").hidden = false; };
+  return false;
 }
 function markiere(id) {
   document.querySelectorAll(".leiste li.aktiv, .pin.aktiv").forEach((e) => e.classList.remove("aktiv"));

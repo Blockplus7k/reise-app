@@ -127,3 +127,5 @@ nav button span{font-size:10px}
 #sync-karte label{display:block;font-size:13px;color:var(--muted)}
 #sync-karte label input{margin-top:4px}
 #sync-karte details{font-size:14px}
+#lm-such{margin:6px 0 2px}
+.leiste li.ordner a{border-color:#f59e0b66}

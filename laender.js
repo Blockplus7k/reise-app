@@ -64,6 +64,14 @@ function landBild(c) {
   return o ? `<img src="${o.webFotos[0]}-klein.webp" loading="lazy" alt="">` : `<span class="leer flagge-gross">${flagge(c)}</span>`;
 }
 const landName = (c) => regionDE.of(c) || landInfo[c]?.de || c;
+function grenzenVon(c) {
+  const f = welt.features.find((x) => x.properties.iso === c); if (!f) return null;
+  const g = f.geometry;
+  if (g.type !== "MultiPolygon") return L.geoJSON(f).getBounds();
+  const flaeche = (b) => (b.getNorth() - b.getSouth()) * (b.getEast() - b.getWest());
+  return g.coordinates.map((p) => L.polygon(p.map((r) => r.map(([x, y]) => [y, x]))).getBounds()).sort((a, b) => flaeche(b) - flaeche(a))[0];
+}
+function zeigeLandAufKarte(c) { const b = grenzenVon(c); if (b) map.fitBounds(b, { padding: [20, 20], maxZoom: 9 }); }
 function zoomeLand(c) {
   const f = welt.features.find((x) => x.properties.iso === c);
   landFilter = c; schliesseSheet(); zeichneKarte();
@@ -80,18 +88,31 @@ function alleLaender() {
   landFilter = ""; schliesseSheet(); zeichneKarte(); $("#b-laenderwahl").textContent = "🌍 Alle Länder ▾"; map.setView([35, 10], 2);
 }
 // Aufklapp-Menü: alle Länder des Reiters mit Bild, gruppiert nach Kontinent
+function landKachel(c, m) {
+  const n = orte.filter((o) => isoVonName(o.land) === c).length;
+  const st = m[c] ? LNAME[m[c]] : "";
+  return `<button class="landkachel" onclick="zoomeLand('${c}')">${landBild(c)}<span><b>${flagge(c)} ${esc(landName(c))}</b><small>${[st, n ? `${n} Orte` : ""].filter(Boolean).join(" · ") || (UN_SET.has(c) ? "UN" : "Gebiet")}</small></span></button>`;
+}
 function laenderMenue() {
   const m = statusMap();
   const codes = Object.keys(m).filter((c) => imSegment(m[c]));
   const gruppen = {};
   for (const c of codes) { const k = landInfo[c]?.k || "Sonstige"; (gruppen[k] ||= []).push(c); }
+  const liste = Object.keys(gruppen).sort((a, b) => KONT_REIHE.indexOf(a) - KONT_REIHE.indexOf(b)).map((k) => `<h3>${k} (${gruppen[k].length})</h3><div class="landgitter">` +
+      gruppen[k].sort((a, b) => landName(a).localeCompare(landName(b), "de")).map((c) => landKachel(c, m)).join("") + "</div>").join("") || `<p class="hint">Noch keine Länder in „${LNAME[segment]}“.</p>`;
   oeffneSheet(`<div class="sheet-head"><h2>${LNAME[segment]} (${codes.length})</h2><button class="x" onclick="schliesseSheet()">✕</button></div>
-    <div class="row"><button onclick="alleLaender()">🌍 Ganze Welt</button><button onclick="landSuche()">+ Land</button></div>` +
-    Object.keys(gruppen).sort((a, b) => KONT_REIHE.indexOf(a) - KONT_REIHE.indexOf(b)).map((k) => `<h3>${k} (${gruppen[k].length})</h3><div class="landgitter">` +
-      gruppen[k].sort((a, b) => landName(a).localeCompare(landName(b), "de")).map((c) => {
-        const n = orte.filter((o) => isoVonName(o.land) === c).length;
-        return `<button class="landkachel" onclick="zoomeLand('${c}')">${landBild(c)}<span><b>${flagge(c)} ${esc(landName(c))}</b><small>${n ? `${n} Orte` : UN_SET.has(c) ? "UN" : "Gebiet"}</small></span></button>`;
-      }).join("") + "</div>").join("") || `<p class="hint">Noch keine Länder in „${LNAME[segment]}“.</p>`);
+    <input id="lm-such" type="search" placeholder="🔍 Land suchen …" autocomplete="off">
+    <div class="row"><button onclick="alleLaender()">🌍 Ganze Welt</button><button onclick="landSuche()">+ Land</button></div>
+    <div id="lm-liste">${liste}</div>`);
+  const norm = (x) => x.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  $("#lm-such").oninput = (e) => {
+    const q = norm(e.target.value.trim());
+    if (!q) return ($("#lm-liste").innerHTML = liste);
+    // Suche über alle Länder: eingetragene zuerst
+    const treffer = Object.keys(landInfo).filter((c) => norm(landName(c)).includes(q))
+      .sort((a, b) => (m[a] ? 0 : 1) - (m[b] ? 0 : 1) || landName(a).localeCompare(landName(b), "de")).slice(0, 24);
+    $("#lm-liste").innerHTML = treffer.length ? `<div class="landgitter">${treffer.map((c) => landKachel(c, m)).join("")}</div>` : `<p class="hint">Kein Land gefunden.</p>`;
+  };
 }
 $("#b-laenderwahl").onclick = laenderMenue;
 
