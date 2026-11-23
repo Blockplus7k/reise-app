@@ -288,6 +288,7 @@ async function importiereFotos(files, reiseId) {
     if (best || reiseId) await DB.put("fotos", { id: uid(), ortId: best?.id || null, reiseId: reiseId || null, datum: f.datum, lat: f.gps?.latitude ?? null, lon: f.gps?.longitude ?? null, bild: f.bild, thumb: f.thumb });
   }
   await lade();
+  if (typeof laenderAusFotos === "function") await laenderAusFotos();
   return { zu, neu, ohne };
 }
 $("#in-fotos").onchange = async (e) => {

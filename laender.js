@@ -65,7 +65,52 @@ function zeichneOverlay(m) {
 // Titelbild eines Landes: erstes Webseiten-Foto eines Orts dort
 function landBild(c) {
   const o = orte.find((x) => x.webFotos?.length && isoVonName(x.land) === c);
-  return o ? `<img src="${o.webFotos[0]}-klein.webp" loading="lazy" alt="">` : `<span class="leer flagge-gross">${flagge(c)}</span>`;
+  // Kein Webseiten-Foto → Platzhalter, wird danach mit einem Reise-Foto des Landes gefüllt (fuelleLandBilder)
+  return o ? `<img src="${o.webFotos[0]}-klein.webp" loading="lazy" alt="">` : `<span class="leer flagge-gross" data-landbild="${c}">${flagge(c)}</span>`;
+}
+// Reise-Fotos eines Landes: Fotos aus Reisen in dieses Land + Fotos, deren GPS im Land liegt
+function fotosImLand(c, alle) {
+  const rIds = new Set(reisen.filter((r) => r.land === c).map((r) => r.id));
+  return alle.filter((f) => rIds.has(f.reiseId) || (f.lat != null && landFuerPunkt(f.lat, f.lon) === c));
+}
+async function fuelleLandBilder() {
+  const plaetze = [...document.querySelectorAll("[data-landbild]")]; if (!plaetze.length) return;
+  const alle = await DB.all("fotos");
+  for (const p of plaetze) { const f = fotosImLand(p.dataset.landbild, alle)[0]; if (!f || !p.isConnected) continue;
+    const u = URL.createObjectURL(f.thumb); urls.push(u); p.outerHTML = `<img src="${u}" alt="">`; }
+}
+// Welches Land liegt an diesem Punkt? (Punkt-in-Polygon über die Länderumrisse, mit Rahmen-Vorfilter)
+const bboxCache = new Map();
+function landFuerPunkt(lat, lon) {
+  // Exakt, sonst mit kleiner Toleranz (Küsten, Kleinstaaten – die Umrisse sind vereinfacht)
+  for (const d of [0, 0.03, 0.08, 0.15]) for (const [a, b] of d ? [[d, 0], [-d, 0], [0, d], [0, -d], [d, d], [-d, -d], [d, -d], [-d, d]] : [[0, 0]]) {
+    const c = landExakt(lat + a, lon + b); if (c) return c; }
+  return null;
+}
+function landExakt(lat, lon) {
+  if (!welt || lat == null || lon == null) return null;
+  const innen = (ring) => { let drin = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const [xi, yi] = ring[i], [xj, yj] = ring[j];
+      if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) drin = !drin; }
+    return drin; };
+  for (const f of welt.features) {
+    let b = bboxCache.get(f); if (!b) { b = L.geoJSON(f).getBounds(); bboxCache.set(f, b); }
+    if (!b.contains([lat, lon])) continue;
+    const polys = f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates;
+    if (polys.some((p) => innen(p[0]) && !p.slice(1).some(innen))) return f.properties.iso;
+  }
+  return null;
+}
+// Länder aus Foto-Standorten und Reisen automatisch als bereist eintragen (nur wenn noch nicht bereist/gelebt)
+async function laenderAusFotos(alleFotos) {
+  const alle = alleFotos || (await DB.all("fotos"));
+  const heute = new Date().toISOString().slice(0, 10);
+  const codes = new Set(alle.filter((f) => f.lat != null).map((f) => landFuerPunkt(f.lat, f.lon)).filter(Boolean));
+  for (const r of reisen) if (r.land && r.von && r.von <= heute) codes.add(r.land);
+  const m = statusMap(); let neu = 0;
+  for (const c of codes) if (!warDort(m[c])) { await DB.put("laender", { code: c, status: "besucht" }); neu++; }
+  if (neu) { laenderDaten = await DB.all("laender"); zeichneLaender(); }
+  return neu;
 }
 const landName = (c) => regionDE.of(c) || landInfo[c]?.de || c;
 function grenzenVon(c) {
@@ -108,6 +153,7 @@ function laenderMenue() {
     <input id="lm-such" type="search" placeholder="🔍 Land suchen …" autocomplete="off">
     <div class="row"><button onclick="alleLaender()">🌍 Ganze Welt</button><button onclick="landSuche()">+ Land</button></div>
     <div id="lm-liste">${liste}</div>`);
+  fuelleLandBilder();
   const norm = (x) => x.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   $("#lm-such").oninput = (e) => {
     const q = norm(e.target.value.trim());
@@ -116,6 +162,7 @@ function laenderMenue() {
     const treffer = Object.keys(landInfo).filter((c) => norm(landName(c)).includes(q))
       .sort((a, b) => (m[a] ? 0 : 1) - (m[b] ? 0 : 1) || landName(a).localeCompare(landName(b), "de")).slice(0, 24);
     $("#lm-liste").innerHTML = treffer.length ? `<div class="landgitter">${treffer.map((c) => landKachel(c, m)).join("")}</div>` : `<p class="hint">Kein Land gefunden.</p>`;
+    fuelleLandBilder();
   };
 }
 $("#b-laenderwahl").onclick = laenderMenue;
@@ -131,6 +178,7 @@ function landSheet(c) {
     <p class="meta">${esc(landInfo[c]?.k || "")}${UN_SET.has(c) ? " · UN-Mitglied" : " · zählt nicht zu den 195"}${s ? ` · aktuell: ${LNAME[s]}` : ""}</p>
     <div class="row">${["besucht", "gelebt", "wunsch"].map((x) => `<button onclick="setzeLand('${c}','${x}')" style="${s === x ? `background:${LFARBE[x]};color:#111;border:0` : ""}">${LNAME[x]}</button>`).join("")}</div>
     <div class="row"><button onclick="zoomeLand('${c}')">🗺️ Auf Karte zeigen</button>${s ? `<button onclick="setzeLand('${c}','keins')">Entfernen</button>` : ""}</div>
+    ${reisen.filter((r) => r.land === c).map((r) => `<div class="item" onclick="zeigeOrdner('${r.id}')"><span>📁</span><div><b>${esc(r.titel)}</b><small>${esc(r.von || "")} – ${esc(r.bis || "")}</small></div></div>`).join("")}
     ${orteHier.length ? `<h3>Orte (${orteHier.length})</h3>` + orteHier.map((o) => `<div class="item" onclick="zeigeOrt('${o.id}')"><span class="dot" style="background:${FARBE[o.status]}"></span><div><b>${esc(o.name)}</b><small>${esc(o.status)}</small></div></div>`).join("") : ""}`);
 }
 // Land hinzufügen: bereits eingetragene Länder werden markiert und nur bearbeitet, nie doppelt angelegt
@@ -155,4 +203,5 @@ document.querySelectorAll("#seg button").forEach((b) => (b.onclick = () => {
   if (!laenderDaten.length) { for (const c of START_BEREIST) await DB.putRaw("laender", { code: c, status: "besucht", geaendert: 0 }); laenderDaten = await DB.all("laender"); }
   zeichneLaender();
   zeichneKarte(); // Reise-Pins brauchen die Landesmitten
+  setTimeout(() => laenderAusFotos(), 2500); // rückwirkend: Länder aus vorhandenen Reise-Fotos eintragen
 })();
