@@ -18,6 +18,8 @@
 <body>
 <main>
   <section id="v-karte" class="view active">
+    <div class="laender" id="laender"></div>
+    <div class="map-wrap">
     <div id="map"></div>
     <div class="map-top">
       <select id="f-status"><option value="">Alle</option><option value="besucht">Besucht</option><option value="geplant">Geplant</option><option value="idee">Idee</option></select>
@@ -27,6 +29,8 @@
     <div id="trip-banner" hidden></div>
     <button class="fab" id="b-fotoimport" title="Fotos importieren">📷</button>
     <input type="file" id="in-fotos" accept="image/*" multiple hidden>
+    </div>
+    <ol class="leiste" id="leiste" aria-label="Alle Orte"></ol>
   </section>
   <section id="v-wunsch" class="view"><h1>Wunschliste</h1><div id="wunsch-liste"></div></section>
   <section id="v-reisen" class="view"><h1>Reisen <button id="b-neue-reise" class="small">+ Neu</button></h1><div id="reise-liste"></div></section>

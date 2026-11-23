@@ -1,5 +1,5 @@
 // Offline: App-Dateien + Bibliotheken cachen, Kartenkacheln beim Ansehen merken
-const APP = "reise-app-v2", FOTOS = "fotos-v1", TILES = "tiles-v1";
+const APP = "reise-app-v3", FOTOS = "fotos-v1", TILES = "tiles-v1";
 const DATEIEN = ["./", "index.html", "app.js", "db.js", "style.css", "manifest.webmanifest", "icon-180.png", "web.json", "orte.json",
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css", "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
   "https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css", "https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css",
@@ -10,7 +10,7 @@ self.addEventListener("fetch", (e) => {
   const u = new URL(e.request.url);
   if (e.request.method !== "GET" || u.hostname.includes("nominatim")) return;
   if (u.pathname.includes("/fotos/")) { e.respondWith(caches.open(FOTOS).then(async (c) => (await c.match(e.request)) || fetch(e.request).then((r) => { if (r.ok) c.put(e.request, r.clone()); return r; }))); return; }
-  if (u.hostname.endsWith("tile.openstreetmap.org")) {
+  if (u.hostname.endsWith("tile.openstreetmap.de")) {
     e.respondWith(caches.open(TILES).then(async (c) => (await c.match(e.request)) || fetch(e.request).then((r) => { if (r.ok) c.put(e.request, r.clone()); return r; })));
     return;
   }

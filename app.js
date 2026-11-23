@@ -9,24 +9,63 @@ let orte = [], reisen = [], aktiveReise = null;
 const urls = []; // ObjectURLs für Fotos, beim Schließen freigeben
 
 // ---------- Karte ----------
-const map = L.map("map", { zoomControl: false, worldCopyJump: true }).setView([30, 20], 2);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
-const cluster = L.markerClusterGroup({ maxClusterRadius: 40 }).addTo(map);
+const map = L.map("map", { zoomControl: false, worldCopyJump: true, minZoom: 2 }).setView([40, 10], 3);
+// Wie auf der Webseite: OpenStreetMap Deutschland – deutsche Länder- und Ortsnamen schon weit herausgezoomt
+L.tileLayer("https://tile.openstreetmap.de/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap-Mitwirkende" }).addTo(map);
+const cluster = L.markerClusterGroup({ maxClusterRadius: 45, disableClusteringAtZoom: 9, showCoverageOnHover: false }).addTo(map);
 const routeLayer = L.layerGroup().addTo(map);
 
+const PINFARBE = { ...FARBE, besucht: "#567c8d" };
 function pin(o) {
-  return L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11],
-    html: `<div class="pin" style="background:${FARBE[o.status] || "#888"}"></div>` });
+  return L.divIcon({ className: "", iconSize: [30, 30], iconAnchor: [15, 30],
+    html: `<div class="pin" data-pin="${o.id}" style="background:${PINFARBE[o.status] || "#888"}"></div>` });
+}
+const LAENDER_GESAMT = 195; // 193 UN-Staaten + Vatikan + Palästina
+function zeichneLaender() {
+  const besucht = [...new Set(orte.filter((o) => o.status === "besucht").map((o) => o.land).filter(Boolean))].sort();
+  const wunsch = [...new Set(orte.filter((o) => o.status === "idee" || o.status === "geplant").map((o) => o.land).filter((l) => l && !besucht.includes(l)))];
+  const n = besucht.length, pz = ((n / LAENDER_GESAMT) * 100).toFixed(1).replace(".", ",");
+  $("#laender").innerHTML = `<div class="zahlen"><span class="gross">${n}</span><span>von ${LAENDER_GESAMT} Ländern bereist</span><span class="prozent">${pz} %</span></div>
+    <div class="balken"><i style="width:${Math.max(1, (n / LAENDER_GESAMT) * 100)}%"></i></div>
+    <small>Noch ${LAENDER_GESAMT - n} Länder offen${wunsch.length ? ` · ${wunsch.length} davon auf der Wunschliste` : ""}</small>`;
+  $("#laender").onclick = () => alert(`Bereist (${n}):\n${besucht.join(", ")}` + (wunsch.length ? `\n\nWunschliste:\n${wunsch.join(", ")}` : ""));
+}
+const markerVon = {};
+function zeichneLeiste(liste) {
+  $("#leiste").innerHTML = liste.map((o) => {
+    const bild = o.webFotos?.[0] ? `<img src="${o.webFotos[0]}-klein.webp" loading="lazy" alt="">` : `<span class="leer">📍</span>`;
+    const n = (o.webFotos || []).length;
+    return `<li data-o="${o.id}"><a href="#" onclick="return waehle('${o.id}')">${bild}<span><strong>${esc(o.name)}</strong>
+      <small>${esc(o.land && o.land !== o.name ? o.land : o.typ || "")}${n ? ` · ${n} Fotos` : ""}</small></span></a></li>`;
+  }).join("");
+}
+function markiere(id) {
+  document.querySelectorAll(".leiste li.aktiv, .pin.aktiv").forEach((e) => e.classList.remove("aktiv"));
+  const li = document.querySelector(`.leiste li[data-o="${CSS.escape(id)}"]`);
+  if (li) { li.classList.add("aktiv"); li.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" }); }
+  document.querySelector(`.pin[data-pin="${CSS.escape(id)}"]`)?.classList.add("aktiv");
+}
+function waehle(id) {
+  const o = orte.find((x) => x.id === id);
+  // Zweites Antippen derselben Karte öffnet den Ort
+  if (document.querySelector(`.leiste li.aktiv[data-o="${CSS.escape(id)}"]`)) { zeigeOrt(id); return false; }
+  map.flyTo([o.lat, o.lon], o.typ === "Land" ? 5 : Math.max(map.getZoom(), 7), { duration: 0.8 });
+  map.once("moveend", () => markiere(id));
+  markiere(id);
+  return false;
 }
 
 function zeichneKarte() {
   cluster.clearLayers();
   const fs = $("#f-status").value, fl = $("#f-land").value;
-  for (const o of orte) {
-    if (fs && o.status !== fs) continue;
-    if (fl && o.land !== fl) continue;
-    L.marker([o.lat, o.lon], { icon: pin(o) }).on("click", () => zeigeOrt(o.id)).addTo(cluster);
+  const sicht = orte.filter((o) => (!fs || o.status === fs) && (!fl || o.land === fl))
+    .sort((a, b) => (a.status === "besucht" ? 0 : 1) - (b.status === "besucht" ? 0 : 1) || a.land.localeCompare(b.land) || a.name.localeCompare(b.name));
+  for (const k in markerVon) delete markerVon[k];
+  for (const o of sicht) {
+    markerVon[o.id] = L.marker([o.lat, o.lon], { icon: pin(o), title: o.name })
+      .on("click", () => { markiere(o.id); zeigeOrt(o.id); }).addTo(cluster);
   }
+  zeichneLeiste(sicht);
   const laender = [...new Set(orte.map((o) => o.land).filter(Boolean))].sort();
   $("#f-land").innerHTML = `<option value="">Alle Länder</option>` + laender.map((l) => `<option ${l === fl ? "selected" : ""}>${esc(l)}</option>`).join("");
 }
@@ -313,7 +352,7 @@ document.querySelectorAll("nav button").forEach((b) => (b.onclick = () => wechsl
 
 async function lade() {
   orte = await DB.all("orte"); reisen = await DB.all("reisen");
-  zeichneKarte(); zeichneWunsch(); zeichneReisen(); statistik();
+  zeichneKarte(); zeichneLaender(); zeichneWunsch(); zeichneReisen(); statistik();
 }
 (async () => {
   await lade();
@@ -327,7 +366,11 @@ async function lade() {
     }
   }
   await lade();
-  if (orte.length) map.fitBounds(orte.map((o) => [o.lat, o.lon]), { padding: [40, 40], maxZoom: 8 });
+  map.invalidateSize();
+  const vb = orte.filter((o) => o.status === "besucht");
+  if (vb.length) map.fitBounds(vb.map((o) => [o.lat, o.lon]), { padding: [30, 30], maxZoom: 5 });
+  if (map.getZoom() < 3) map.setZoom(3);
+  new ResizeObserver(() => map.invalidateSize()).observe($("#map"));
   if (navigator.storage?.persist) navigator.storage.persist();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 })();
