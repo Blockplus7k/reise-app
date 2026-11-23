@@ -127,6 +127,6 @@ document.querySelectorAll("#seg button").forEach((b) => (b.onclick = () => {
   welt = await fetch("welt.geojson").then((r) => r.json());
   for (const f of welt.features) landInfo[f.properties.iso] = f.properties;
   laenderDaten = await DB.all("laender");
-  if (!laenderDaten.length) { for (const c of START_BEREIST) await DB.put("laender", { code: c, status: "besucht" }); laenderDaten = await DB.all("laender"); }
+  if (!laenderDaten.length) { for (const c of START_BEREIST) await DB.putRaw("laender", { code: c, status: "besucht", geaendert: 0 }); laenderDaten = await DB.all("laender"); }
   zeichneLaender();
 })();

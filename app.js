@@ -403,11 +403,16 @@ async function statistik() {
   $("#stats").innerHTML = `${orte.length} Orte · ${b.length} besucht · ${new Set(b.map((o) => o.land).filter(Boolean)).size} Länder besucht · ${reisen.length} Reisen · ${fotos} Fotos`;
 }
 $("#b-export").onclick = async () => {
-  const blob = new Blob([JSON.stringify({ version: 2, exportiert: new Date().toISOString(), orte, reisen, laender: await DB.all("laender") }, null, 1)], { type: "application/json" });
+  // Backup inkl. eigener Fotos (als Data-URLs), damit die Datei alles wiederherstellen kann
+  const zuUrl = (b) => new Promise((r) => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(b); });
+  const fotos = [];
+  for (const f of await DB.all("fotos")) { const { bild, thumb, ...rest } = f; fotos.push({ ...rest, bild: await zuUrl(bild), thumb: await zuUrl(thumb) }); }
+  const blob = new Blob([JSON.stringify({ version: 3, exportiert: new Date().toISOString(), orte, reisen, laender: await DB.all("laender"), fotos })], { type: "application/json" });
   const file = new File([blob], `reisen-backup-${new Date().toISOString().slice(0, 10)}.json`, { type: "application/json" });
   if (navigator.canShare?.({ files: [file] })) return navigator.share({ files: [file] }).catch(() => {});
   const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = file.name; a.click();
 };
+
 $("#in-import").onchange = async (e) => {
   const file = e.target.files[0]; e.target.value = ""; if (!file) return;
   let d; try { d = JSON.parse(await file.text()); } catch { return alert("Keine gültige JSON-Datei"); }
@@ -420,8 +425,12 @@ $("#in-import").onchange = async (e) => {
   }
   for (const r of d.reisen || []) await DB.put("reisen", r);
   for (const l of d.laender || []) await DB.put("laender", l);
+  let nf = 0;
+  for (const f of d.fotos || []) { if (await DB.get("fotos", f.id)) continue;
+    const zuBlob = (u) => fetch(u).then((r) => r.blob());
+    await DB.put("fotos", { ...f, bild: await zuBlob(f.bild), thumb: await zuBlob(f.thumb) }); nf++; }
   if (d.laender) laenderDaten = await DB.all("laender");
-  await lade(); alert(`${n} neue Orte, ${a} aktualisiert, ${(d.reisen || []).length} Reisen importiert.`);
+  await lade(); alert(`${n} neue Orte, ${a} aktualisiert, ${(d.reisen || []).length} Reisen importiert` + (nf ? `, ${nf} Fotos wiederhergestellt` : "") + ".");
 };
 
 // ---------- Navigation & Start ----------
@@ -443,7 +452,7 @@ async function lade() {
     const d = await fetch(datei).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     for (const o of d?.orte || []) {
       const alt = orte.find((x) => x.id === o.id);
-      if (!alt) await DB.put("orte", o);
+      if (!alt) await DB.putRaw("orte", { ...o, geaendert: 0 });
       else if (o.webFotos && JSON.stringify(alt.webFotos) !== JSON.stringify(o.webFotos)) await DB.put("orte", { ...alt, webFotos: o.webFotos });
     }
   }

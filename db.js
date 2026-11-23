@@ -25,8 +25,14 @@ const DB = (() => {
   return {
     all: async (s) => req((await store(s)).getAll()),
     get: async (s, id) => req((await store(s)).get(id)),
-    put: async (s, v) => req((await store(s, "readwrite")).put(v)),
-    del: async (s, id) => req((await store(s, "readwrite")).delete(id)),
+    // put/del merken Änderungen für die Cloud-Sicherung (sync.js); putRaw/delRaw nicht (für den Abgleich selbst)
+    put: async (s, v) => { v.geaendert = Date.now(); if (s === "fotos") v.sync = false;
+      const r = await req((await store(s, "readwrite")).put(v)); window.planeSync?.(); return r; },
+    del: async (s, id) => { const r = await req((await store(s, "readwrite")).delete(id));
+      try { const t = JSON.parse(localStorage.getItem("geloescht") || "{}"); t[s + ":" + id] = Date.now(); localStorage.setItem("geloescht", JSON.stringify(t)); } catch {}
+      window.planeSync?.(); return r; },
+    putRaw: async (s, v) => req((await store(s, "readwrite")).put(v)),
+    delRaw: async (s, id) => req((await store(s, "readwrite")).delete(id)),
     byOrt: async (ortId) => req((await store("fotos")).index("ortId").getAll(ortId)),
   };
 })();

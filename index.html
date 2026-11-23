@@ -39,9 +39,10 @@
   <section id="v-reisen" class="view"><h1>Reisen <button id="b-neue-reise" class="small">+ Neu</button></h1><div id="reise-liste"></div></section>
   <section id="v-mehr" class="view">
     <h1>Daten</h1>
-    <div class="card">
+    <div class="card" id="sync-karte"></div>
+    <div class="card" style="margin-top:12px">
       <p id="stats"></p>
-      <button id="b-export">Backup exportieren (JSON)</button>
+      <button id="b-export">Backup mit Fotos exportieren</button>
       <label class="btn">Backup / orte.json importieren<input type="file" id="in-import" accept=".json,application/json" hidden></label>
       <p class="hint">orte.json aus dem Obsidian-Vault (<code>python3 _tools/export_app.py</code>) wird zusammengeführt, bestehende Fotos/Reisen bleiben erhalten.</p>
     </div>
@@ -61,5 +62,6 @@
 <script src="db.js"></script>
 <script src="app.js"></script>
 <script src="laender.js"></script>
+<script src="sync.js"></script>
 </body>
 </html>
