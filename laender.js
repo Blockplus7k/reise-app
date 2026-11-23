@@ -13,12 +13,16 @@ const flagge = (c) => String.fromCodePoint(...[...c].map((x) => 0x1f1a5 + x.char
 let laenderDaten = [], welt = null, landInfo = {}, segment = "besucht", overlay = null;
 
 // Land-Name (aus Orten, deutsch) → ISO2
+// Name → ISO2 über eine einmal gebaute Tabelle (vorher: Schleife über alle Länder bei jedem Aufruf → App hing)
+let nameTabelle = null;
 function isoVonName(n) {
   if (!n) return null;
-  const alias = { "USA": "US", "Vereinigtes Königreich": "GB", "England": "GB", "Schottland": "GB", "Wales": "GB", "Türkei": "TR", "Tschechien": "CZ" };
-  if (alias[n]) return alias[n];
-  for (const c in landInfo) if (landInfo[c].de === n || regionDE.of(c) === n) return c;
-  return null;
+  if (!nameTabelle) {
+    if (!Object.keys(landInfo).length) return null;
+    nameTabelle = new Map(Object.entries({ "USA": "US", "Vereinigtes Königreich": "GB", "England": "GB", "Schottland": "GB", "Wales": "GB", "Türkei": "TR", "Tschechien": "CZ", "Moldawien": "MD", "Moldau": "MD" }));
+    for (const c in landInfo) { if (!nameTabelle.has(landInfo[c].de)) nameTabelle.set(landInfo[c].de, c); const d = regionDE.of(c); if (d && !nameTabelle.has(d)) nameTabelle.set(d, c); }
+  }
+  return nameTabelle.get(n) || null;
 }
 // Status je Land: gespeicherter Eintrag gewinnt, sonst aus Orten abgeleitet
 function statusMap() {
@@ -60,7 +64,7 @@ function zeichneOverlay(m) {
 }
 // Titelbild eines Landes: erstes Webseiten-Foto eines Orts dort
 function landBild(c) {
-  const o = orte.find((x) => isoVonName(x.land) === c && x.webFotos?.length);
+  const o = orte.find((x) => x.webFotos?.length && isoVonName(x.land) === c);
   return o ? `<img src="${o.webFotos[0]}-klein.webp" loading="lazy" alt="">` : `<span class="leer flagge-gross">${flagge(c)}</span>`;
 }
 const landName = (c) => regionDE.of(c) || landInfo[c]?.de || c;

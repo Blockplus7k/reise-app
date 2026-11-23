@@ -40,7 +40,7 @@ function zeichneLeiste(liste) {
   $("#leiste").innerHTML = rs.map((r) => `<li data-r="${r.id}" class="ordner"><a href="#" onclick="return zeigeOrdner('${r.id}')">
       <span class="leer" data-rbild="${r.id}">${r.land ? flagge(r.land) : "🧳"}</span><span><strong>📁 ${esc(r.titel)}</strong>
       <small data-ranz="${r.id}">${esc((r.von || "").slice(0, 4))} · Reise</small></span></a></li>`).join("") +
-    liste.map((o) => {
+    liste.filter((o) => o.webFotos?.length).map((o) => {
     const bild = o.webFotos?.[0] ? `<img src="${o.webFotos[0]}-klein.webp" loading="lazy" alt="">` : `<span class="leer">📍</span>`;
     const n = (o.webFotos || []).length;
     return `<li data-o="${o.id}"><a href="#" onclick="return waehle('${o.id}')">${bild}<span><strong>${esc(o.name)}</strong>
@@ -57,6 +57,17 @@ async function fuelleOrdner(rs) {
     const platz = document.querySelector(`[data-rbild="${r.id}"]`);
     if (platz && fs[0]) { const u = URL.createObjectURL(fs[0].thumb); leisteUrls.push(u); platz.outerHTML = `<img src="${u}" alt="">`; }
   }
+}
+async function raeumeFotoOrteAuf() {
+  let n = 0;
+  for (const o of orte.filter((x) => /^Foto-Ort/.test(x.name))) {
+    const fs = await DB.byOrt(o.id);
+    if (fs.length && !fs.every((f) => f.reiseId)) continue; // per 📷-Knopf importiert → bleibt
+    for (const f of fs) { f.ortId = null; f.lat ??= o.lat; f.lon ??= o.lon; await DB.put("fotos", f); }
+    for (const r of reisen) if (r.tage.some((t) => t.orte.includes(o.id))) { r.tage.forEach((t) => (t.orte = t.orte.filter((x) => x !== o.id))); await DB.put("reisen", r); }
+    await DB.del("orte", o.id); n++;
+  }
+  if (n) await lade();
 }
 // Ordner-Ansicht: alle Fotos der Reise (direkt zur Reise hinzugefügt + von Orten der Reise)
 async function zeigeOrdner(id) {
@@ -244,7 +255,12 @@ async function importiereFotos(files, reiseId) {
   for (const file of files) {
     const f = await leseFoto(file);
     let best = null;
-    if (f.gps) {
+    // Fotos einer Reise legen keine neuen „Foto-Orte“ an – sie gehören in den Reise-Ordner
+    if (f.gps && reiseId) {
+      const { latitude: la, longitude: lo } = f.gps; let bd = 1;
+      for (const o of orte) { const d = distKm(la, lo, o.lat, o.lon); if (d < bd) { bd = d; best = o; } }
+      if (best) zu++;
+    } else if (f.gps) {
       const { latitude: la, longitude: lo } = f.gps; let bd = 1;
       for (const o of orte) { const d = distKm(la, lo, o.lat, o.lon); if (d < bd) { bd = d; best = o; } }
       if (!best) {
@@ -254,7 +270,7 @@ async function importiereFotos(files, reiseId) {
       if (best.status !== "besucht") { best.status = "besucht"; best.besuchtAm = best.besuchtAm || f.datum || ""; }
       await DB.put("orte", best);
     } else ohne++;
-    if (best || reiseId) await DB.put("fotos", { id: uid(), ortId: best?.id || null, reiseId: reiseId || null, datum: f.datum, bild: f.bild, thumb: f.thumb });
+    if (best || reiseId) await DB.put("fotos", { id: uid(), ortId: best?.id || null, reiseId: reiseId || null, datum: f.datum, lat: f.gps?.latitude ?? null, lon: f.gps?.longitude ?? null, bild: f.bild, thumb: f.thumb });
   }
   await lade();
   return { zu, neu, ohne };
@@ -493,6 +509,7 @@ async function lade() {
     }
   }
   await lade();
+  await raeumeFotoOrteAuf();
   map.invalidateSize();
   new ResizeObserver(() => map.invalidateSize()).observe($("#map"));
   if (navigator.storage?.persist) navigator.storage.persist();
