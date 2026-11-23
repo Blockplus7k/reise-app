@@ -4,13 +4,16 @@ const DB = (() => {
   function open() {
     if (dbp) return dbp;
     dbp = new Promise((res, rej) => {
-      const r = indexedDB.open("reise-app", 1);
-      r.onupgradeneeded = () => {
+      const r = indexedDB.open("reise-app", 2);
+      r.onupgradeneeded = (e) => {
         const d = r.result;
-        d.createObjectStore("orte", { keyPath: "id" });
-        d.createObjectStore("reisen", { keyPath: "id" });
-        const f = d.createObjectStore("fotos", { keyPath: "id" });
-        f.createIndex("ortId", "ortId");
+        if (e.oldVersion < 1) {
+          d.createObjectStore("orte", { keyPath: "id" });
+          d.createObjectStore("reisen", { keyPath: "id" });
+          const f = d.createObjectStore("fotos", { keyPath: "id" });
+          f.createIndex("ortId", "ortId");
+        }
+        if (e.oldVersion < 2) d.createObjectStore("laender", { keyPath: "code" }); // {code: ISO2, status: besucht|gelebt|wunsch}
       };
       r.onsuccess = () => res(r.result);
       r.onerror = () => rej(r.error);

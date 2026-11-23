@@ -323,7 +323,7 @@ async function statistik() {
   $("#stats").innerHTML = `${orte.length} Orte · ${b.length} besucht · ${new Set(b.map((o) => o.land).filter(Boolean)).size} Länder besucht · ${reisen.length} Reisen · ${fotos} Fotos`;
 }
 $("#b-export").onclick = async () => {
-  const blob = new Blob([JSON.stringify({ version: 1, exportiert: new Date().toISOString(), orte, reisen }, null, 1)], { type: "application/json" });
+  const blob = new Blob([JSON.stringify({ version: 2, exportiert: new Date().toISOString(), orte, reisen, laender: await DB.all("laender") }, null, 1)], { type: "application/json" });
   const file = new File([blob], `reisen-backup-${new Date().toISOString().slice(0, 10)}.json`, { type: "application/json" });
   if (navigator.canShare?.({ files: [file] })) return navigator.share({ files: [file] }).catch(() => {});
   const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = file.name; a.click();
@@ -339,6 +339,8 @@ $("#in-import").onchange = async (e) => {
     await DB.put("orte", rec); alt ? a++ : n++;
   }
   for (const r of d.reisen || []) await DB.put("reisen", r);
+  for (const l of d.laender || []) await DB.put("laender", l);
+  if (d.laender) laenderDaten = await DB.all("laender");
   await lade(); alert(`${n} neue Orte, ${a} aktualisiert, ${(d.reisen || []).length} Reisen importiert.`);
 };
 
