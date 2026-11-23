@@ -1,5 +1,5 @@
 // Offline: App-Dateien + Bibliotheken cachen, Kartenkacheln beim Ansehen merken
-const APP = "reise-app-v6", FOTOS = "fotos-v1", TILES = "tiles-v1";
+const APP = "reise-app-v7", FOTOS = "fotos-v1", TILES = "tiles-v1";
 const DATEIEN = ["./", "index.html", "app.js", "db.js", "style.css", "manifest.webmanifest", "icon-180.png", "laender.js", "welt.geojson", "web.json", "orte.json",
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css", "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
   "https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css", "https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css",

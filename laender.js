@@ -108,12 +108,15 @@ function landSheet(c) {
     <div class="row"><button onclick="zoomeLand('${c}')">🗺️ Auf Karte zeigen</button>${s ? `<button onclick="setzeLand('${c}','keins')">Entfernen</button>` : ""}</div>
     ${orteHier.length ? `<h3>Orte (${orteHier.length})</h3>` + orteHier.map((o) => `<div class="item" onclick="zeigeOrt('${o.id}')"><span class="dot" style="background:${FARBE[o.status]}"></span><div><b>${esc(o.name)}</b><small>${esc(o.status)}</small></div></div>`).join("") : ""}`);
 }
+// Land hinzufügen: bereits eingetragene Länder werden markiert und nur bearbeitet, nie doppelt angelegt
 function landSuche() {
-  const alle = Object.keys(landInfo).map((c) => [c, regionDE.of(c) || landInfo[c].de]).sort((a, b) => a[1].localeCompare(b[1], "de"));
+  const m = statusMap();
+  const norm = (x) => x.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const alle = Object.keys(landInfo).map((c) => [c, landName(c)]).sort((a, b) => (m[a[0]] ? 0 : 1) - (m[b[0]] ? 0 : 1) || a[1].localeCompare(b[1], "de"));
   oeffneSheet(`<div class="sheet-head"><h2>Land hinzufügen</h2><button class="x" onclick="schliesseSheet()">✕</button></div>
     <input id="land-such" placeholder="Land suchen…" autocomplete="off"><div id="land-treffer"></div>`);
-  const zeig = (q) => { $("#land-treffer").innerHTML = alle.filter(([, n]) => n.toLowerCase().includes(q.toLowerCase())).slice(0, 30)
-    .map(([c, n]) => `<button class="treffer" onclick="landSheet('${c}')">${flagge(c)} ${esc(n)}</button>`).join(""); };
+  const zeig = (q) => { q = norm(q); $("#land-treffer").innerHTML = alle.filter(([, n]) => norm(n).includes(q)).slice(0, 40)
+    .map(([c, n]) => `<button class="treffer" onclick="landSheet('${c}')">${flagge(c)} ${esc(n)}${m[c] ? ` <small class="schon">✓ ${LNAME[m[c]]} – bearbeiten</small>` : ""}</button>`).join(""); };
   $("#land-such").oninput = (e) => zeig(e.target.value); zeig(""); $("#land-such").focus();
 }
 document.querySelectorAll("#seg button").forEach((b) => (b.onclick = () => {

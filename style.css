@@ -115,3 +115,8 @@ nav button span{font-size:10px}
 .antwort{background:var(--card);border-radius:12px;padding:8px 12px;margin:8px 0}
 .antwort small{color:var(--muted)}
 .antwort p{margin:2px 0 0}
+.tag-status{margin-left:auto;font-size:11px;font-weight:700;border-radius:6px;padding:2px 7px;background:#f59e0b33;color:#b45309}
+.tag-status.g{background:#2563eb33;color:#2563eb}
+.treffer small{color:var(--muted)}
+.treffer .schon{color:#16a34a}
+#wseg button{font-size:13px;padding:8px 4px}

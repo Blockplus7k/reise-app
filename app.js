@@ -231,16 +231,28 @@ $("#in-fotos").onchange = async (e) => {
 
 
 // ---------- Wunschliste ----------
+// Wunschliste: nur Orte mit Status idee/geplant. „Geplant“ = Status geplant oder in einer Reise eingetragen.
+let wunschFilter = "alle";
+const istGeplant = (o) => o.status === "geplant" || reisen.some((r) => r.tage.some((t) => t.orte.includes(o.id)));
 function zeichneWunsch() {
-  const w = orte.filter((o) => o.status === "idee" || o.status === "geplant").sort((a, b) => a.land.localeCompare(b.land) || a.prio - b.prio || a.name.localeCompare(b.name));
+  const alle = orte.filter((o) => o.status === "idee" || o.status === "geplant");
+  const nG = alle.filter(istGeplant).length;
+  const knoepfe = { alle: `Alle (${alle.length})`, offen: `Noch nicht geplant (${alle.length - nG})`, geplant: `Geplant (${nG})` };
+  document.querySelectorAll("#wseg button").forEach((b) => { b.textContent = knoepfe[b.dataset.w]; b.classList.toggle("on", b.dataset.w === wunschFilter); });
+  const w = alle.filter((o) => wunschFilter === "alle" || (wunschFilter === "geplant") === istGeplant(o))
+    .sort((a, b) => a.land.localeCompare(b.land) || a.prio - b.prio || a.name.localeCompare(b.name));
   let land = null, h = "";
   for (const o of w) {
     if (o.land !== land) { land = o.land; h += `<h3>${esc(land || "Ohne Land")}</h3>`; }
-    h += `<div class="item" onclick="zeigeOrt('${o.id}')"><span class="dot" style="background:${FARBE[o.status]}"></span>
-      <div><b>${esc(o.name)}</b><small>${esc(o.typ)} · ${esc(o.region)} · Prio ${o.prio}</small></div></div>`;
+    const g = istGeplant(o);
+    const reise = reisen.find((r) => r.tage.some((t) => t.orte.includes(o.id)));
+    h += `<div class="item" onclick="zeigeOrt('${o.id}')"><span class="dot" style="background:${g ? FARBE.geplant : FARBE.idee}"></span>
+      <div><b>${esc(o.name)}</b><small>${esc([o.typ, o.region, "Prio " + o.prio].filter(Boolean).join(" · "))}${reise ? ` · 🧳 ${esc(reise.titel)}` : ""}</small></div>
+      <span class="tag-status ${g ? "g" : ""}">${g ? "geplant" : "offen"}</span></div>`;
   }
-  $("#wunsch-liste").innerHTML = h || "<p class='hint'>Noch keine Wunschorte.</p>";
+  $("#wunsch-liste").innerHTML = h || `<p class='hint'>${wunschFilter === "geplant" ? "Noch nichts geplant – füge Wunschorte einer Reise hinzu." : "Keine Wunschorte."}</p>`;
 }
+document.querySelectorAll("#wseg button").forEach((b) => (b.onclick = () => { wunschFilter = b.dataset.w; zeichneWunsch(); }));
 
 // ---------- Reisen ----------
 function tageZwischen(von, bis) {
@@ -271,7 +283,8 @@ function bearbeiteReise(r) {
   oeffneSheet(`
     <div class="sheet-head"><h2>${r.id ? "Reise bearbeiten" : "Neue Reise"}</h2><button class="x" onclick="schliesseSheet()">✕</button></div>
     <form id="f-reise">
-      <label>Wohin?<select name="land"><option value="">– Land wählen –</option>${laenderListe.map(([c, n]) => `<option value="${c}" ${c === r.land ? "selected" : ""}>${flagge(c)} ${esc(n)}</option>`).join("")}</select></label>
+      <label>Wohin?<input id="r-land-such" placeholder="Land suchen, z. B. Isl…" autocomplete="off" value="${r.land ? esc(flagge(r.land) + " " + landName(r.land)) : ""}"></label>
+      <input type="hidden" name="land" value="${esc(r.land || "")}"><div id="r-land-treffer"></div>
       <label>Titel<input name="titel" value="${esc(r.titel || "")}" placeholder="z. B. Island Roadtrip"></label>
       <p class="frage">Wann war die Reise?</p>
       <div class="row"><label>Von<input type="date" name="von" required value="${esc(r.von || "")}"></label><label>Bis<input type="date" name="bis" required value="${esc(r.bis || "")}"></label></div>
@@ -287,6 +300,18 @@ function bearbeiteReise(r) {
     </form>`);
   const f = $("#f-reise");
   let sterne = r.sterne || 0;
+  const norm = (x) => x.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  $("#r-land-such").onfocus = (e) => e.target.select();
+  $("#r-land-such").oninput = (e) => {
+    const q = norm(e.target.value.trim()); f.land.value = "";
+    if (!q) return ($("#r-land-treffer").innerHTML = "");
+    const m = statusMap();
+    const treffer = laenderListe.filter(([c, n]) => norm(n).includes(q) || c.toLowerCase() === q)
+      .sort((a, b) => norm(a[1]).startsWith(q) === norm(b[1]).startsWith(q) ? 0 : norm(a[1]).startsWith(q) ? -1 : 1).slice(0, 8);
+    $("#r-land-treffer").innerHTML = treffer.map(([c, n]) => `<button type="button" class="treffer" data-c="${c}">${flagge(c)} ${esc(n)}${m[c] ? ` <small>· ${LNAME[m[c]]}</small>` : ""}</button>`).join("") || "<p class='hint'>Kein Land gefunden</p>";
+  };
+  $("#r-land-treffer").onclick = (e) => { const b = e.target.closest("[data-c]"); if (!b) return;
+    f.land.value = b.dataset.c; $("#r-land-such").value = flagge(b.dataset.c) + " " + landName(b.dataset.c); $("#r-land-treffer").innerHTML = ""; };
   $("#sterne").onclick = (e) => { const n = +e.target.dataset.n; if (!n) return; sterne = n;
     $("#sterne").querySelectorAll("button").forEach((b) => b.classList.toggle("an", +b.dataset.n <= n)); };
   // Fragen nur bei Reisen, die schon begonnen haben
@@ -298,6 +323,10 @@ function bearbeiteReise(r) {
     e.preventDefault();
     const d = Object.fromEntries(new FormData(f)); const files = [...f.fotos.files];
     if (d.bis < d.von) return alert("Ende liegt vor Anfang");
+    if (!r.id) {
+      const gleich = reisen.find((x) => x.land && x.land === d.land && x.von === d.von);
+      if (gleich) { if (confirm(`„${gleich.titel}“ mit diesem Land und Startdatum gibt es schon. Stattdessen diese Reise bearbeiten?`)) return bearbeiteReise(gleich); }
+    }
     const fragen = {}; for (const [k] of FRAGEN) { if (d["f_" + k]?.trim()) fragen[k] = d["f_" + k].trim(); }
     const titel = d.titel.trim() || `${d.land ? landName(d.land) : "Reise"} ${d.von.slice(0, 4)}`;
     const alt = Object.fromEntries((r.tage || []).map((t) => [t.datum, t.orte]));
