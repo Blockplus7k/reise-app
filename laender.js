@@ -51,7 +51,7 @@ function zeichneLaender() {
 
 function stil(m) {
   return (f) => { const s = m[f.properties.iso];
-    return { weight: 0.6, color: "#0b0d0c", fillOpacity: 1, fillColor: s ? LFARBE[s] : "#3a3f3c" }; };
+    return { weight: 0.6, color: "#ffffff", fillOpacity: 1, fillColor: s ? LFARBE[s] : "#d6dbd7" }; };
 }
 function zeichneWelt(m) {
   if (weltLayer) weltLayer.remove();
@@ -68,12 +68,10 @@ function zeichneOverlay(m) {
 function zeichneUebersicht(m) {
   const codes = Object.keys(m).filter((c) => (segment === "besucht" ? warDort(m[c]) : m[c] === segment));
   const n = codes.filter((c) => UN_SET.has(c)).length, pz = Math.floor((n / UN.length) * 100);
-  const U = 2 * Math.PI * 34;
-  $("#gesamt").innerHTML = `<div><b>${pz}<small>%</small></b><span>Welt</span></div>
-    <svg viewBox="0 0 80 80" width="80" height="80"><circle cx="40" cy="40" r="34" fill="none" stroke="var(--line)" stroke-width="10"/>
-      <circle cx="40" cy="40" r="34" fill="none" stroke="${LFARBE[segment]}" stroke-width="10" stroke-dasharray="${(U * n) / UN.length} ${U}" transform="rotate(-90 40 40)"/></svg>
-    <div><b>${n}</b><span>${segment === "wunsch" ? "Wunschländer" : "Länder"}</span></div>
-    <p>von ${UN.length} UN-Ländern${codes.length > n ? ` · +${codes.length - n} weitere Gebiete` : ""}</p>`;
+  const label = segment === "wunsch" ? "Ländern auf der Wunschliste" : segment === "gelebt" ? "Ländern gelebt" : "Ländern bereist";
+  $("#gesamt").innerHTML = `<div class="zahlen"><span class="gross">${n}</span><span>von ${UN.length} ${label}</span><span class="prozent">${pz} %</span></div>
+    <div class="balken"><i style="width:${Math.max(1, (n / UN.length) * 100)}%;background:${LFARBE[segment]}"></i></div>
+    <small>${segment === "wunsch" ? "" : `Noch ${UN.length - n} Länder offen`}${codes.length > n ? ` · +${codes.length - n} weitere Gebiete` : ""}</small>`;
   const gruppen = {};
   for (const c of codes) { const k = landInfo[c]?.k || "Sonstige"; (gruppen[k] ||= []).push(c); }
   const name = (c) => regionDE.of(c) || landInfo[c]?.de || c;
