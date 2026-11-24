@@ -600,7 +600,13 @@ async function lade() {
   map.invalidateSize();
   new ResizeObserver(() => map.invalidateSize()).observe($("#map"));
   if (navigator.storage?.persist) navigator.storage.persist();
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
+  // Neue Version automatisch laden: beim Öffnen nach Updates suchen, bei neuer Version einmal neu laden
+  if ("serviceWorker" in navigator) {
+    const reg = await navigator.serviceWorker.register("sw.js");
+    let neuGeladen = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => { if (!neuGeladen) { neuGeladen = true; location.reload(); } });
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") reg.update().catch(() => {}); });
+  }
 })();
 // Reise-Namen an den Ordner-Pins erst ab Länder-Zoom zeigen (sonst überlappen sie in der Weltansicht)
 const namenZoom = () => $("#map").classList.toggle("pins-klein", map.getZoom() < 5);
