@@ -105,10 +105,14 @@ function landExakt(lat, lon) {
 async function laenderAusFotos(alleFotos) {
   const alle = alleFotos || (await DB.all("fotos"));
   const heute = new Date().toISOString().slice(0, 10);
-  const codes = new Set(alle.filter((f) => f.lat != null).map((f) => landFuerPunkt(f.lat, f.lon)).filter(Boolean));
+  // Nur sichere Treffer: mindestens 3 Fotos genau innerhalb der Landesgrenze (Grenznähe zählt nicht)
+  const zaehler = {};
+  for (const f of alle) if (f.lat != null) { const c = landExakt(f.lat, f.lon); if (c) zaehler[c] = (zaehler[c] || 0) + 1; }
+  const codes = new Set(Object.keys(zaehler).filter((c) => zaehler[c] >= 3));
   for (const r of reisen) if (r.land && r.von && r.von <= heute) codes.add(r.land);
   const m = statusMap(); let neu = 0;
-  for (const c of codes) if (!warDort(m[c])) { await DB.put("laender", { code: c, status: "besucht" }); neu++; }
+  const vonHand = new Set(laenderDaten.filter((l) => l.status === "keins").map((l) => l.code)); // „Entfernen“ bleibt entfernt
+  for (const c of codes) if (!warDort(m[c]) && !vonHand.has(c)) { await DB.put("laender", { code: c, status: "besucht" }); neu++; }
   if (neu) { laenderDaten = await DB.all("laender"); zeichneLaender(); }
   return neu;
 }

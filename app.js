@@ -50,16 +50,87 @@ function zeichneLeiste(liste) {
 }
 // Jede Reise als Ordner-Pin auf der Weltkarte: Mitte der Foto-Standorte, sonst Mitte des Landes
 const reiseLayer = L.layerGroup().addTo(map);
+const reiseOrteLayer = L.layerGroup().addTo(map);
+let reiseFotoCache = {};
+// Pin-Position: ein echter Foto-Standort (der „mittigste“, bevorzugt im Reiseland) – liegt so nie im Meer
+function reisePosition(r, alle) {
+  let pts = reiseFotos(r, alle).filter((f) => f.lat != null && f.lon != null).map((f) => [f.lat, f.lon]);
+  for (const oid of r.tage.flatMap((t) => t.orte)) { const o = orte.find((x) => x.id === oid); if (o) pts.push([o.lat, o.lon]); }
+  if (r.land && typeof landFuerPunkt === "function") { const imLand = pts.filter((p) => landFuerPunkt(p[0], p[1]) === r.land); if (imLand.length) pts = imLand; }
+  if (pts.length) {
+    const m = [pts.reduce((s, p) => s + p[0], 0) / pts.length, pts.reduce((s, p) => s + p[1], 0) / pts.length];
+    return pts.reduce((best, p) => (distKm(p[0], p[1], m[0], m[1]) < distKm(best[0], best[1], m[0], m[1]) ? p : best));
+  }
+  if (r.land && typeof landInfo !== "undefined" && landInfo[r.land]) return [landInfo[r.land].ly, landInfo[r.land].lx];
+  return null;
+}
 function zeichneReisePins(rs, alle) {
-  reiseLayer.clearLayers();
+  reiseLayer.clearLayers(); reiseFotoCache = {};
   for (const r of rs) {
-    const pts = reiseFotos(r, alle).filter((f) => f.lat != null && f.lon != null).map((f) => [f.lat, f.lon]);
-    for (const oid of r.tage.flatMap((t) => t.orte)) { const o = orte.find((x) => x.id === oid); if (o) pts.push([o.lat, o.lon]); }
-    let pos = pts.length ? [pts.reduce((s, p) => s + p[0], 0) / pts.length, pts.reduce((s, p) => s + p[1], 0) / pts.length] : null;
-    if (!pos && r.land && typeof landInfo !== "undefined" && landInfo[r.land]) pos = [landInfo[r.land].ly, landInfo[r.land].lx];
-    if (!pos) continue;
-    L.marker(pos, { zIndexOffset: 1000, title: r.titel, icon: L.divIcon({ className: "", iconSize: [40, 40], iconAnchor: [20, 20],
-      html: `<div class="reise-pin">📁<span>${esc(r.titel)}</span></div>` }) }).on("click", () => zeigeOrdner(r.id)).addTo(reiseLayer);
+    reiseFotoCache[r.id] = reiseFotos(r, alle);
+    const pos = reisePosition(r, alle); if (!pos) continue;
+    L.marker(pos, { zIndexOffset: 1000, title: r.titel, icon: L.divIcon({ className: "", iconSize: [30, 30], iconAnchor: [15, 30],
+      html: `<div class="pin reise" data-reise="${r.id}"><b>📁</b></div><span class="pin-name">${esc(r.titel)}</span>` }) })
+      .on("click", () => reiseMenue(r.id)).addTo(reiseLayer);
+  }
+}
+// Fotos mit Standort zu Orten bündeln (alles innerhalb ~1,5 km = ein Ort)
+function fotoGruppen(fs) {
+  const gruppen = [];
+  for (const f of fs.filter((x) => x.lat != null).sort((a, b) => (a.datum || "").localeCompare(b.datum || ""))) {
+    const g = gruppen.find((g) => distKm(g.lat, g.lon, f.lat, f.lon) < 1.5);
+    if (g) { g.fotos.push(f); g.lat = (g.lat * (g.fotos.length - 1) + f.lat) / g.fotos.length; g.lon = (g.lon * (g.fotos.length - 1) + f.lon) / g.fotos.length; }
+    else gruppen.push({ lat: f.lat, lon: f.lon, fotos: [f] });
+  }
+  return gruppen;
+}
+async function reiseMenue(id) {
+  const r = reisen.find((x) => x.id === id); if (!r) return;
+  const fs = reiseFotoCache[id] || reiseFotos(r, await DB.all("fotos"));
+  const gruppen = fotoGruppen(fs), ohne = fs.filter((f) => f.lat == null).length;
+  oeffneSheet(`<div class="sheet-head"><h2>📁 ${esc(r.titel)}</h2><button class="x" onclick="schliesseSheet()">✕</button></div>
+    <p class="meta">${r.land ? flagge(r.land) + " " + esc(landName(r.land)) + " · " : ""}${esc(r.von || "")} – ${esc(r.bis || "")}</p>
+    <div class="wahlknoepfe">
+      <button onclick="zeigeOrdner('${id}')"><span>🖼️</span><b>Alle Fotos</b><small>${fs.length} Fotos</small></button>
+      <button onclick="zeigeReiseOrte('${id}')" ${gruppen.length ? "" : "disabled"}><span>📍</span><b>Nach Orten</b><small>${gruppen.length} Orte auf der Karte${ohne ? ` · ${ohne} ohne Standort` : ""}</small></button>
+    </div>
+    <div class="row"><button onclick="zeigeReise('${id}')">Reise-Details & Antworten</button></div>`);
+}
+// Orts-Pins einer Reise – erst sichtbar, nachdem man den Reise-Pin geöffnet hat
+const ortNamen = {};
+async function zeigeReiseOrte(id) {
+  const r = reisen.find((x) => x.id === id); if (!r) return;
+  const gruppen = fotoGruppen(reiseFotoCache[id] || reiseFotos(r, await DB.all("fotos")));
+  schliesseSheet(); reiseOrteAus(); $("#trip-banner").hidden = true;
+  gruppen.forEach((g, i) => {
+    const u = URL.createObjectURL(g.fotos[0].thumb); pinUrls.push(u);
+    L.marker([g.lat, g.lon], { zIndexOffset: 2000, icon: L.divIcon({ className: "", iconSize: [46, 46], iconAnchor: [23, 23],
+      html: `<div class="foto-pin"><img src="${u}" alt=""><i>${g.fotos.length}</i></div>` }) })
+      .on("click", () => zeigeFotoGruppe(id, i)).addTo(reiseOrteLayer);
+  });
+  reiseOrteLayer.gruppen = gruppen; reiseOrteLayer.reise = id;
+  $("#trip-banner").innerHTML = `📁 ${esc(r.titel)} · ${gruppen.length} Orte <button onclick="reiseOrteAus()">✕</button>`; $("#trip-banner").hidden = false;
+  if (gruppen.length) map.fitBounds(gruppen.map((g) => [g.lat, g.lon]), { padding: [50, 50], maxZoom: 13 });
+}
+let pinUrls = [];
+function reiseOrteAus() { reiseOrteLayer.clearLayers(); pinUrls.forEach(URL.revokeObjectURL); pinUrls = []; $("#trip-banner").hidden = true; }
+async function zeigeFotoGruppe(id, i) {
+  const g = reiseOrteLayer.gruppen?.[i]; if (!g) return;
+  const key = g.lat.toFixed(3) + "," + g.lon.toFixed(3);
+  const bekannt = orte.find((o) => distKm(o.lat, o.lon, g.lat, g.lon) < 1);
+  const html = g.fotos.map((f) => { const u = URL.createObjectURL(f.thumb); urls.push(u); return `<img src="${u}" data-f="${f.id}" alt="">`; }).join("");
+  const daten = [...new Set(g.fotos.map((f) => f.datum).filter(Boolean))];
+  oeffneSheet(`<div class="sheet-head"><h2 id="gruppe-name">${esc(bekannt?.name || ortNamen[key] || "Ort " + (i + 1))}</h2><button class="x" onclick="schliesseSheet()">✕</button></div>
+    <p class="meta">${g.fotos.length} Fotos${daten.length ? " · " + esc(daten.join(", ")) : ""}</p>
+    <div class="galerie" id="g-galerie">${html}</div>
+    <div class="row"><button onclick="reiseMenue('${id}')">← Zur Reise</button><a class="btn" href="https://maps.apple.com/?ll=${g.lat},${g.lon}" target="_blank">Apple Karten</a></div>`);
+  $("#g-galerie").onclick = (e) => { const f = g.fotos.find((x) => x.id === e.target.dataset.f); if (!f) return;
+    const u = URL.createObjectURL(f.bild); urls.push(u); $("#viewer-img").src = u; $("#viewer").hidden = false; };
+  // Ortsnamen einmalig über OpenStreetMap nachschlagen
+  if (!bekannt && !ortNamen[key]) {
+    const d = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=14&accept-language=de&lat=${g.lat}&lon=${g.lon}`).then((r) => r.json()).catch(() => null);
+    const a = d?.address || {}; const n = a.village || a.town || a.city || a.suburb || a.municipality || a.county || d?.name;
+    if (n) { ortNamen[key] = n; const h = $("#gruppe-name"); if (h) h.textContent = n; }
   }
 }
 async function fuelleOrdner(rs) {
